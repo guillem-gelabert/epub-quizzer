@@ -33,12 +33,13 @@
               <p>No table of contents available.</p>
             </div>
             <ul v-else class="space-y-2">
-              <li
-                v-for="item in toc"
-                :key="item.id"
-                class="text-gray-700 py-1"
-              >
-                {{ item.label }}
+              <li v-for="item in toc" :key="item.id" class="text-gray-700 py-1">
+                <NuxtLink
+                  :to="`/chapter/${encodeURIComponent(normalizeHref(item.href))}`"
+                  class="text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
+                >
+                  {{ item.label }}
+                </NuxtLink>
               </li>
             </ul>
           </div>
@@ -59,5 +60,10 @@
 
 <script setup lang="ts">
 const { metadata, toc } = useEpubState();
-</script>
 
+// Normalize href: remove fragment and ensure leading slash
+const normalizeHref = (href: string): string => {
+  const withoutFragment = href.split('#')[0];
+  return withoutFragment.startsWith('/') ? withoutFragment : `/${withoutFragment}`;
+};
+</script>
