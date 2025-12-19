@@ -6,14 +6,32 @@
     >
       <p class="text-gray-600">Loading chapter...</p>
     </div>
-    <div v-else class="scroll-container">
+    <div
+      v-else
+      ref="scrollContainer"
+      class="scroll-container"
+      :class="{ 'scroll-disabled': isScrollDisabled }"
+      @scroll="handleScroll"
+      @wheel="handleWheel"
+      @touchmove="handleTouchMove"
+    >
       <div
-        v-for="(paragraph, index) in paragraphs"
+        v-for="(item, index) in displayItems"
         :key="index"
         class="paragraph-snap"
+        :data-index="index"
       >
-        <div class="paragraph-content">
-          <p v-html="paragraph"></p>
+        <div v-if="item.type === 'paragraph'" class="paragraph-content">
+          <p v-html="item.content"></p>
+        </div>
+        <div v-else-if="item.type === 'button'" class="button-container">
+          <button
+            v-if="item.groupIndex !== undefined"
+            @click="unlockNextSection(item.groupIndex)"
+            class="continue-button"
+          >
+            Continue
+          </button>
         </div>
       </div>
     </div>
@@ -25,6 +43,42 @@ const route = useRoute();
 const { toc, chapterContent, tocToSpineMap } = useEpubState();
 
 const paragraphs = ref<string[]>([]);
+const scrollContainer = ref<HTMLElement | null>(null);
+const unlockedGroups = ref<Set<number>>(new Set([0])); // First group is always unlocked
+const isScrollDisabled = ref(false);
+const currentScrollPosition = ref(0);
+
+interface DisplayItem {
+  type: "paragraph" | "button";
+  content?: string;
+  groupIndex?: number;
+}
+
+const displayItems = computed<DisplayItem[]>(() => {
+  const items: DisplayItem[] = [];
+  const PARAGRAPHS_PER_GROUP = 4;
+
+  paragraphs.value.forEach((paragraph, index) => {
+    items.push({
+      type: "paragraph",
+      content: paragraph,
+    });
+
+    // Add button after every 4th paragraph (but not after the last paragraph)
+    if (
+      (index + 1) % PARAGRAPHS_PER_GROUP === 0 &&
+      index < paragraphs.value.length - 1
+    ) {
+      const groupIndex = Math.floor((index + 1) / PARAGRAPHS_PER_GROUP);
+      items.push({
+        type: "button",
+        groupIndex,
+      });
+    }
+  });
+
+  return items;
+});
 
 // Normalize href: remove fragment and ensure leading slash
 const normalizeHref = (href: string): string => {
@@ -62,6 +116,100 @@ const extractParagraphs = (html: string): string[] => {
   }
 
   return extracted;
+};
+
+const handleScroll = () => {
+  if (!scrollContainer.value || isScrollDisabled.value) {
+    return;
+  }
+
+  const container = scrollContainer.value;
+  const scrollTop = container.scrollTop;
+  const containerHeight = container.clientHeight;
+  const viewportCenter = scrollTop + containerHeight / 2;
+
+  // Find which item is currently centered in view
+  const items = container.querySelectorAll(".paragraph-snap");
+  let currentItemIndex = -1;
+  let minDistance = Infinity;
+
+  items.forEach((item, index) => {
+    const element = item as HTMLElement;
+    const itemTop = element.offsetTop;
+    const itemHeight = element.offsetHeight;
+    const itemCenter = itemTop + itemHeight / 2;
+    const distance = Math.abs(viewportCenter - itemCenter);
+
+    if (distance < minDistance) {
+      minDistance = distance;
+      currentItemIndex = index;
+    }
+  });
+
+  // Check if we're at a locked button
+  if (currentItemIndex >= 0 && currentItemIndex < displayItems.value.length) {
+    const currentItem = displayItems.value[currentItemIndex];
+    if (
+      currentItem &&
+      currentItem.type === "button" &&
+      currentItem.groupIndex !== undefined
+    ) {
+      const groupIndex = currentItem.groupIndex;
+      if (!unlockedGroups.value.has(groupIndex)) {
+        // Lock scrolling at this button
+        isScrollDisabled.value = true;
+        currentScrollPosition.value = scrollTop;
+
+        // Prevent further scrolling
+        container.style.overflow = "hidden";
+
+        // Scroll back to the button position
+        const buttonElement = items[currentItemIndex] as HTMLElement;
+        if (buttonElement) {
+          const buttonTop =
+            buttonElement.offsetTop -
+            containerHeight / 2 +
+            buttonElement.offsetHeight / 2;
+          container.scrollTo({
+            top: buttonTop,
+            behavior: "smooth",
+          });
+        }
+      }
+    }
+  }
+};
+
+const handleWheel = (e: WheelEvent) => {
+  if (isScrollDisabled.value) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+};
+
+const handleTouchMove = (e: TouchEvent) => {
+  if (isScrollDisabled.value) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+};
+
+const unlockNextSection = (groupIndex: number) => {
+  unlockedGroups.value.add(groupIndex);
+  isScrollDisabled.value = false;
+
+  if (scrollContainer.value) {
+    scrollContainer.value.style.overflow = "scroll";
+    // Allow a small scroll to continue
+    setTimeout(() => {
+      if (scrollContainer.value) {
+        scrollContainer.value.scrollBy({
+          top: 1,
+          behavior: "smooth",
+        });
+      }
+    }, 100);
+  }
 };
 
 onMounted(async () => {
@@ -116,6 +264,17 @@ onMounted(async () => {
   scroll-snap-type: y mandatory;
   scroll-behavior: smooth;
   -webkit-overflow-scrolling: touch;
+  /* Hide scrollbar */
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE and Edge */
+}
+
+.scroll-container::-webkit-scrollbar {
+  display: none; /* Chrome, Safari, Opera */
+}
+
+.scroll-container.scroll-disabled {
+  overflow: hidden;
 }
 
 .paragraph-snap {
@@ -171,5 +330,32 @@ onMounted(async () => {
 
 .paragraph-content :deep(li) {
   margin-bottom: 0.5rem;
+}
+
+.button-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+}
+
+.continue-button {
+  padding: 1rem 2rem;
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: white;
+  background-color: #3b82f6;
+  border: none;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.continue-button:hover {
+  background-color: #2563eb;
+}
+
+.continue-button:active {
+  background-color: #1d4ed8;
 }
 </style>
