@@ -29,3 +29,6 @@ logs
 /blob-report/
 /playwright/.cache/
 /playwright/.auth/
+
+# Stored books
+.books

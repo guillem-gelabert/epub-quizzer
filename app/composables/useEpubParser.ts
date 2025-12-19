@@ -1,5 +1,5 @@
 import ePub from 'epubjs'
-import type { Book, NavItem, TocItem } from 'epubjs'
+import type { Book, NavItem } from 'epubjs'
 import type { BookMetadata } from './useEpubState'
 import type Section from 'epubjs/types/section';
 
@@ -147,8 +147,6 @@ export const useEpubParser = () => {
         console.warn(`No spine match found for ToC item: ${tocItem.label} (href: ${tocItem.href}, normalized: ${normalizedTocHref})`)
       }
     }
-    
-    console.log('ToC to Spine mapping:', map)
 
     return map
   }
