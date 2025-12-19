@@ -1,5 +1,5 @@
 import ePub from 'epubjs'
-import type { Book } from 'epubjs'
+import type { Book, TocItem } from 'epubjs'
 import type { BookMetadata } from './useEpubState'
 
 export const useEpubParser = () => {
@@ -25,10 +25,29 @@ export const useEpubParser = () => {
     }
   }
 
+  const extractToc = async (book: Book): Promise<TocItem[]> => {
+    const navigation = await book.loaded.navigation
+    const toc = navigation?.toc || []
+    
+    // Flatten nested subitems recursively
+    const flattenToc = (items: TocItem[]): TocItem[] => {
+      const flattened: TocItem[] = []
+      for (const item of items) {
+        flattened.push(item)
+        if (item.subitems && item.subitems.length > 0) {
+          flattened.push(...flattenToc(item.subitems))
+        }
+      }
+      return flattened
+    }
+    
+    return flattenToc(toc)
+  }
 
   return {
     parseEpub,
     extractMetadata,
+    extractToc,
   }
 }
 
