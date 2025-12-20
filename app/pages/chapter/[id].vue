@@ -6,96 +6,52 @@
     >
       <p class="text-gray-600">Loading chapter...</p>
     </div>
-    <div v-else ref="scrollContainer" class="scroll-container">
+    <div v-else class="chapter-wrapper">
       <div
-        class="scroll-content"
-        :style="{ height: `${totalContentHeight}vh` }"
+        ref="scrollContainer"
+        class="scroll-container"
+        @scroll="handleScrollIndicator"
       >
         <div
-          v-for="(item, index) in displayItems"
-          :key="index"
-          class="paragraph-snap"
-          :data-index="index"
+          class="scroll-content"
+          :style="{ height: `${totalContentHeight}vh` }"
         >
-          <div v-if="item.type === 'paragraph'" class="paragraph-content">
-            <p v-html="item.content"></p>
-          </div>
-          <div v-else-if="item.type === 'question'" class="question-container">
-            <div v-if="item.isLoading" class="loading-state">
-              <p class="loading-text">Generating questions...</p>
-              <p class="loading-hint">This may take up to a minute</p>
+          <div
+            v-for="(item, index) in displayItems"
+            :key="index"
+            class="paragraph-snap"
+            :data-index="index"
+          >
+            <div v-if="item.type === 'paragraph'" class="paragraph-content">
+              <p v-html="item.content"></p>
             </div>
-            <template v-else-if="item.questionData">
-              <h2 class="question-text">{{ item.questionData.question }}</h2>
-              <div class="radio-group">
-                <label
-                  v-for="(choiceText, choiceKey) in item.questionData.choices"
-                  :key="choiceKey"
-                  class="radio-label"
-                >
-                  <input
-                    v-if="
-                      item.questionGateIndex !== undefined &&
-                      item.questionInGateIndex !== undefined
-                    "
-                    type="radio"
-                    :name="`question-${item.questionGateIndex}-${item.questionInGateIndex}`"
-                    :value="choiceKey"
-                    :checked="item.selectedAnswer === choiceKey"
-                    :disabled="item.selectedAnswer !== undefined"
-                    @change="
-                      handleOptionSelect(
-                        choiceKey,
-                        item.questionGateIndex,
-                        item.questionInGateIndex
-                      )
-                    "
-                    class="radio-input"
-                  />
-                  <span class="radio-text"
-                    >{{ choiceKey }}. {{ choiceText }}</span
-                  >
-                </label>
-              </div>
-              <button
-                v-if="
-                  item.questionGateIndex !== undefined &&
-                  item.questionInGateIndex !== undefined &&
-                  item.selectedAnswer === undefined
-                "
-                @click="
-                  handleAnswerSubmit(
-                    item.questionGateIndex!,
-                    item.questionInGateIndex!
-                  )
-                "
-                :disabled="selectedAnswer === null"
-                class="continue-button"
-                :class="{
-                  'button-disabled': selectedAnswer === null,
-                }"
-              >
-                Continue
-              </button>
-            </template>
-          </div>
-          <div v-else-if="item.type === 'reveal'" class="reveal-container">
-            <p
-              class="reveal-text"
-              :class="{
-                'reveal-correct': item.isCorrect,
-                'reveal-incorrect': !item.isCorrect,
-              }"
+            <div
+              v-else-if="item.type === 'question'"
+              class="question-container"
             >
-              {{ item.isCorrect ? "that's correct" : "that's not correct" }}
-            </p>
-          </div>
-          <div v-else-if="item.type === 'score'" class="score-container">
-            <h2 class="score-title">Gate Complete!</h2>
-            <p class="score-percentage">{{ item.score }}%</p>
-            <p class="score-description">
-              You answered {{ item.score }}% of the questions correctly.
-            </p>
+              <div v-if="item.isLoading" class="loading-state">
+                <p class="loading-text">Generating questions...</p>
+                <p class="loading-hint">This may take up to a minute</p>
+              </div>
+              <template
+                v-else-if="
+                  item.questionData &&
+                  item.questionGateIndex !== undefined &&
+                  item.questionInGateIndex !== undefined
+                "
+              >
+                <QuizQuestion
+                  :question="item.questionData.question"
+                  :answers="
+                    Object.values(item.questionData.choices) as Array<string>
+                  "
+                  :correct-index="
+                    ['A', 'B', 'C'].indexOf(item.questionData.correct_choice)
+                  "
+                  :question-id="`${item.questionGateIndex}-${item.questionInGateIndex}`"
+                />
+              </template>
+            </div>
           </div>
         </div>
       </div>
@@ -108,7 +64,7 @@ import type { ReaderState, Chunk } from "~/composables/useOpenAi";
 import type { McqQuestion } from "~/composables/useQuizGenerator";
 
 const route = useRoute();
-const { toc, chapterContent, tocToSpineMap } = useEpubState();
+const { toc, chapterContent, tocToSpineMap, currentBookId } = useEpubState();
 const { generateQuiz } = useQuizGenerator();
 
 const paragraphs = ref<string[]>([]);
@@ -118,6 +74,8 @@ const selectedAnswers = ref<Map<number, string>>(new Map()); // Changed to strin
 // Track answers per question (gateIndex-questionIndex -> answer)
 const questionAnswers = ref<Map<string, string>>(new Map());
 const selectedAnswer = ref<string | null>(null);
+const currentItemIndex = ref<number>(0);
+const readItems = ref<Set<number>>(new Set());
 
 // Gate positions pre-calculated when chapter loads
 const gatePositions = ref<
@@ -144,7 +102,7 @@ const loadingQuestions = ref<Set<number>>(new Set());
 const questionStates = ref<Map<number, ReaderState>>(new Map()); // Store nextState per gate
 
 interface DisplayItem {
-  type: "paragraph" | "question" | "reveal" | "score";
+  type: "paragraph" | "question";
   content?: string;
   questionIndex?: number;
   questionGateIndex?: number; // Which gate this question belongs to
@@ -153,7 +111,6 @@ interface DisplayItem {
   isCorrect?: boolean;
   questionData?: McqQuestion; // The actual question data
   isLoading?: boolean;
-  score?: number; // Percentage score for the gate
 }
 
 // Helper function to count words in HTML content
@@ -276,11 +233,11 @@ const precalculateGates = () => {
 
 // Function to calculate number of questions based on word count
 const calculateQuestionCount = (wordCount: number): 1 | 2 | 3 | 4 => {
-  if (wordCount < 100) {
+  if (wordCount < 200) {
     return 1;
-  } else if (wordCount < 200) {
-    return 2;
   } else if (wordCount < 300) {
+    return 2;
+  } else if (wordCount < 400) {
     return 3;
   } else {
     return 4;
@@ -394,20 +351,6 @@ const displayItems = computed<DisplayItem[]>(() => {
           questionInGateIndex: currentQIndex,
           isLoading: true,
         });
-      } else if (allQuestionsAnswered) {
-        // All questions answered - show score
-        const correctCount = questions.reduce((count, q, qIdx) => {
-          const answerKey = `${gate.gateIndex}-${qIdx}`;
-          const userAnswer = questionAnswers.value.get(answerKey);
-          return count + (userAnswer === q.correct_choice ? 1 : 0);
-        }, 0);
-        const score = Math.round((correctCount / questions.length) * 100);
-
-        items.push({
-          type: "score",
-          questionGateIndex: gate.gateIndex,
-          score,
-        });
       } else {
         // Show all questions sequentially
         questions.forEach((question, qIdx) => {
@@ -427,20 +370,8 @@ const displayItems = computed<DisplayItem[]>(() => {
               isCurrent && !isAnswered
                 ? selectedAnswer.value || undefined
                 : answer,
-            isCorrect: answer === question.correct_choice,
+            isCorrect: answer ? answer === question.correct_choice : undefined,
           });
-
-          // Show reveal immediately after answered questions
-          if (isAnswered) {
-            items.push({
-              type: "reveal",
-              questionIndex: gate.gateIndex,
-              questionGateIndex: gate.gateIndex,
-              questionInGateIndex: qIdx,
-              selectedAnswer: answer,
-              isCorrect: answer === question.correct_choice,
-            });
-          }
         });
       }
 
@@ -547,13 +478,45 @@ const extractParagraphs = (html: string): string[] => {
   return extracted;
 };
 
-// Scroll handler no longer needed - height is controlled dynamically
+// Scroll indicator handler
+const handleScrollIndicator = () => {
+  if (!scrollContainer.value) {
+    return;
+  }
 
-// Wheel handler no longer needed - height is controlled dynamically
+  const container = scrollContainer.value;
+  const scrollTop = container.scrollTop;
+  const containerHeight = container.clientHeight;
+  const viewportCenter = scrollTop + containerHeight / 2;
 
-// Touch move handler no longer needed - height is controlled dynamically
+  // Find which item is currently centered in view
+  const items = container.querySelectorAll(".paragraph-snap");
+  let closestIndex = 0;
+  let minDistance = Infinity;
 
-const handleOptionSelect = (
+  items.forEach((item, index) => {
+    const element = item as HTMLElement;
+    const itemTop = element.offsetTop;
+    const itemHeight = element.offsetHeight;
+    const itemCenter = itemTop + itemHeight / 2;
+    const distance = Math.abs(viewportCenter - itemCenter);
+
+    if (distance < minDistance) {
+      minDistance = distance;
+      closestIndex = index;
+    }
+  });
+
+  // Update current item
+  currentItemIndex.value = closestIndex;
+
+  // Mark all items before current as read
+  for (let i = 0; i < closestIndex; i++) {
+    readItems.value.add(i);
+  }
+};
+
+const handleOptionSelect = async (
   choiceKey: string,
   gateIndex?: number,
   questionInGateIndex?: number
@@ -563,11 +526,16 @@ const handleOptionSelect = (
     const currentQIndex = currentQuestionIndex.value.get(gateIndex) ?? 0;
     if (questionInGateIndex === currentQIndex) {
       selectedAnswer.value = choiceKey;
+      // Auto-submit the answer immediately
+      await handleAnswerSubmit(gateIndex, questionInGateIndex);
     }
   }
 };
 
-const handleAnswerSubmit = (gateIndex: number, questionInGateIndex: number) => {
+const handleAnswerSubmit = async (
+  gateIndex: number,
+  questionInGateIndex: number
+) => {
   // Use the current selected answer
   if (selectedAnswer.value === null) {
     return;
@@ -583,6 +551,37 @@ const handleAnswerSubmit = (gateIndex: number, questionInGateIndex: number) => {
   // Store the answer for this specific question
   const answerKey = `${gateIndex}-${questionInGateIndex}`;
   questionAnswers.value.set(answerKey, selectedAnswer.value);
+
+  // Save quiz data to server
+  if (currentBookId.value) {
+    try {
+      const chapterHref = route.params.id as string;
+      const allAnswers: Record<string, string> = {};
+      questions.forEach((_, qIdx) => {
+        const key = `${gateIndex}-${qIdx}`;
+        const answer = questionAnswers.value.get(key);
+        if (answer) {
+          allAnswers[qIdx.toString()] = answer;
+        }
+      });
+
+      await $fetch(`/api/books/${currentBookId.value}/quiz-data`, {
+        method: "POST",
+        body: {
+          chapterHref,
+          gateIndex,
+          questions: questions.map((q) => ({
+            question: q.question,
+            choices: q.choices,
+            correct_choice: q.correct_choice,
+          })),
+          answers: allAnswers,
+        },
+      });
+    } catch (error) {
+      console.error("Failed to save quiz data:", error);
+    }
+  }
 
   // Check if there are more questions in this gate
   const hasMoreQuestions = questionInGateIndex < questions.length - 1;
@@ -646,34 +645,6 @@ const handleAnswerSubmit = (gateIndex: number, questionInGateIndex: number) => {
         nextGate.endParagraphIndex
       );
     }
-  }
-
-  if (scrollContainer.value) {
-    // Scroll to score display
-    setTimeout(() => {
-      if (scrollContainer.value) {
-        const items = scrollContainer.value.querySelectorAll(".paragraph-snap");
-        const scoreItemIndex = displayItems.value.findIndex(
-          (item) =>
-            item.type === "score" && item.questionGateIndex === gateIndex
-        );
-
-        if (scoreItemIndex >= 0) {
-          const scoreElement = items[scoreItemIndex] as HTMLElement;
-          if (scoreElement) {
-            const containerHeight = scrollContainer.value.clientHeight;
-            const scoreTop =
-              scoreElement.offsetTop -
-              containerHeight / 2 +
-              scoreElement.offsetHeight / 2;
-            scrollContainer.value.scrollTo({
-              top: scoreTop,
-              behavior: "smooth",
-            });
-          }
-        }
-      }
-    }, 100);
   }
 
   // Reset selected answer
@@ -885,6 +856,12 @@ watch(
   background-color: #f9fafb;
 }
 
+.chapter-wrapper {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
 .scroll-container {
   height: 100vh;
   overflow-y: scroll;
@@ -1000,88 +977,6 @@ watch(
   background-color: #9ca3af;
 }
 
-.question-container {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  max-width: 42rem;
-  gap: 2rem;
-}
-
-.question-text {
-  font-size: 1.5rem;
-  font-weight: 600;
-  color: #1f2937;
-  text-align: center;
-}
-
-.radio-group {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  width: 100%;
-}
-
-.radio-label {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 1rem;
-  border: 2px solid #e5e7eb;
-  border-radius: 0.5rem;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.radio-label:hover {
-  border-color: #3b82f6;
-  background-color: #eff6ff;
-}
-
-.radio-input {
-  width: 1.25rem;
-  height: 1.25rem;
-  cursor: pointer;
-}
-
-.radio-input:checked + .radio-text {
-  font-weight: 600;
-  color: #3b82f6;
-}
-
-.radio-label:has(.radio-input:checked) {
-  border-color: #3b82f6;
-  background-color: #eff6ff;
-}
-
-.radio-text {
-  font-size: 1.125rem;
-  color: #1f2937;
-}
-
-.reveal-container {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-}
-
-.reveal-text {
-  font-size: 1.5rem;
-  font-weight: 600;
-  text-align: center;
-}
-
-.reveal-correct {
-  color: #10b981;
-}
-
-.reveal-incorrect {
-  color: #ef4444;
-}
-
 .loading-state {
   display: flex;
   flex-direction: column;
@@ -1104,33 +999,71 @@ watch(
   text-align: center;
 }
 
-.score-container {
+.chapter-wrapper {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.scroll-indicator {
+  position: fixed;
+  right: 1rem;
+  top: 50%;
+  transform: translateY(-50%);
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  padding: 3rem 2rem;
-  text-align: center;
+  gap: 0.5rem;
+  z-index: 100;
+  pointer-events: none;
 }
 
-.score-title {
-  font-size: 1.5rem;
-  font-weight: 700;
-  color: #1f2937;
-  margin-bottom: 1.5rem;
+.indicator-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #d1d5db;
+  transition: all 0.2s;
 }
 
-.score-percentage {
-  font-size: 4rem;
-  font-weight: 700;
-  color: #3b82f6;
-  margin-bottom: 1rem;
-  line-height: 1;
+.indicator-dot.indicator-read {
+  background-color: #6b7280;
 }
 
-.score-description {
-  font-size: 1.125rem;
-  color: #6b7280;
+.indicator-dot.indicator-current {
+  width: 12px;
+  height: 12px;
+  background-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+}
+
+/* Question colors take priority */
+.indicator-dot.indicator-question-correct {
+  background-color: #10b981 !important;
+}
+
+.indicator-dot.indicator-question-correct.indicator-current {
+  width: 12px;
+  height: 12px;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);
+}
+
+.indicator-dot.indicator-question-incorrect {
+  background-color: #ef4444 !important;
+}
+
+.indicator-dot.indicator-question-incorrect.indicator-current {
+  width: 12px;
+  height: 12px;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.2);
+}
+
+.indicator-dot.indicator-question-unanswered {
+  background-color: #fbbf24;
+}
+
+.indicator-dot.indicator-question-unanswered.indicator-current {
+  width: 12px;
+  height: 12px;
+  box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.2);
 }
 </style>

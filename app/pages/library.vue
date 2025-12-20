@@ -7,13 +7,7 @@
         v-if="!metadata"
         class="bg-white rounded-lg shadow-md p-8 text-center"
       >
-        <p class="text-gray-600 mb-4">No book uploaded yet.</p>
-        <NuxtLink
-          to="/"
-          class="inline-block px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-        >
-          Upload EPUB
-        </NuxtLink>
+        <p class="text-gray-600 mb-4">No book found in .books directory.</p>
       </div>
 
       <div v-else class="bg-white rounded-lg shadow-md p-6">

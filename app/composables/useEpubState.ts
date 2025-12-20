@@ -113,17 +113,30 @@ export const useEpubState = () => {
     }
   };
 
-  // Initialize function to load book from storage
+  // Initialize function to load book from storage or .books directory
   const initializeBook = async () => {
     if (import.meta.client && !currentBookId.value) {
+      // First try to load from localStorage
       const storedBookId = localStorage.getItem("currentBookId");
       if (storedBookId) {
         try {
           await loadBookFromServer(storedBookId);
+          return;
         } catch (err) {
           console.error("Failed to load stored book:", err);
           localStorage.removeItem("currentBookId");
         }
+      }
+
+      // If no stored book, load the first available book from .books directory
+      try {
+        const bookIds = await $fetch<string[]>("/api/books/list");
+        if (bookIds && bookIds.length > 0) {
+          // Load the first book
+          await loadBookFromServer(bookIds[0]);
+        }
+      } catch (err) {
+        console.error("Failed to load book from .books directory:", err);
       }
     }
   };
