@@ -60,6 +60,7 @@
 </template>
 
 <script setup lang="ts">
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from "vue";
 import type { ReaderState, Chunk } from "~/composables/useOpenAi";
 import type { McqQuestion } from "~/composables/useQuizGenerator";
 
@@ -279,14 +280,26 @@ const generateQuestionsForGate = async (
       setTimeout(() => reject(new Error("Question generation timeout")), 60000); // 60 second timeout
     });
 
+    // Get current book ID
+    if (!currentBookId.value) {
+      throw new Error("No book selected");
+    }
+
+    // Find the gate from gatePositions
+    const gate = gatePositions.value.find((g) => g.gateIndex === gateIndex);
+    if (!gate) {
+      throw new Error(`Gate ${gateIndex} not found`);
+    }
+
+    // Calculate chunk indices for the gate
+    // For now, use paragraph indices as chunk indices (simplified)
+    const gateStartChunkIndex = gate.startParagraphIndex;
+    const gateEndChunkIndex = gate.endParagraphIndex;
+
     const quizPromise = generateQuiz({
-      state: readerState.value,
-      windowChunks: chunks,
-      questionCount,
-      model: "gpt-5.2",
-      chapterNumber,
-      paragraphIndex,
-      questionNumber: gateIndex,
+      bookId: currentBookId.value,
+      gateStartChunkIndex,
+      gateEndChunkIndex,
     });
 
     const result = (await Promise.race([
@@ -452,10 +465,9 @@ const extractParagraphs = (html: string): string[] => {
   const parser = new DOMParser();
   const doc = parser.parseFromString(html, "text/html");
 
-  // Get all paragraph elements and other block elements
-  const elements = doc.querySelectorAll(
-    "p, div, h1, h2, h3, h4, h5, h6, blockquote, li"
-  );
+  // Get all first level children of the body
+  const elements = Array.from(doc.body.children.item(0)?.children || []);
+  console.log(elements);
   const extracted: string[] = [];
 
   elements.forEach((el) => {
@@ -552,36 +564,8 @@ const handleAnswerSubmit = async (
   const answerKey = `${gateIndex}-${questionInGateIndex}`;
   questionAnswers.value.set(answerKey, selectedAnswer.value);
 
-  // Save quiz data to server
-  if (currentBookId.value) {
-    try {
-      const chapterHref = route.params.id as string;
-      const allAnswers: Record<string, string> = {};
-      questions.forEach((_, qIdx) => {
-        const key = `${gateIndex}-${qIdx}`;
-        const answer = questionAnswers.value.get(key);
-        if (answer) {
-          allAnswers[qIdx.toString()] = answer;
-        }
-      });
-
-      await $fetch(`/api/books/${currentBookId.value}/quiz-data`, {
-        method: "POST",
-        body: {
-          chapterHref,
-          gateIndex,
-          questions: questions.map((q) => ({
-            question: q.question,
-            choices: q.choices,
-            correct_choice: q.correct_choice,
-          })),
-          answers: allAnswers,
-        },
-      });
-    } catch (error) {
-      console.error("Failed to save quiz data:", error);
-    }
-  }
+  // Note: Quiz attempts can be submitted via GraphQL when gate is complete
+  // Answers are stored in component state for now
 
   // Check if there are more questions in this gate
   const hasMoreQuestions = questionInGateIndex < questions.length - 1;
@@ -690,7 +674,7 @@ const loadChapterContent = () => {
     paragraphs.value = extracted;
 
     // Initialize reader state with chapter title from ToC
-    const tocItem = toc.value?.find((item) => {
+    const tocItem = toc.value?.find((item: { href: string; label: string }) => {
       const itemNormalizedHref = normalizeHref(item.href);
       return itemNormalizedHref === normalizedHref;
     });

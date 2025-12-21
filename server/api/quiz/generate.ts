@@ -2,7 +2,7 @@ import {
   QuizPipeline,
   type Chunk,
   type ReaderState,
-} from "~/composables/useOpenAi";
+} from "../../../app/composables/useOpenAi";
 import path from "node:path";
 
 export default defineEventHandler(async (event) => {

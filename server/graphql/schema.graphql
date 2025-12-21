@@ -1,0 +1,113 @@
+type Session {
+  id: ID!
+  createdAt: String!
+  lastSeenAt: String!
+  userAgentHash: String
+  locale: String
+}
+
+type Book {
+  id: ID!
+  contentHash: String!
+  title: String!
+  author: String!
+  toc: JSON
+  coverPath: String
+  createdAt: String!
+  sections: [BookSection!]!
+}
+
+type BookSection {
+  id: ID!
+  bookId: ID!
+  sectionIndex: Int!
+  href: String!
+  title: String
+  html: String
+  plainText: String
+  createdAt: String!
+}
+
+type Chunk {
+  id: String!
+  bookId: ID!
+  chunkIndex: Int!
+  sectionId: ID!
+  sectionIndex: Int!
+  text: String!
+  wordCount: Int!
+  sourceHint: JSON
+}
+
+type ReadingProgress {
+  sessionId: ID!
+  bookId: ID!
+  currentChunkIndex: Int!
+  unlockedUntilChunkIndex: Int!
+  updatedAt: String!
+}
+
+type Quiz {
+  id: ID!
+  sessionId: ID!
+  bookId: ID!
+  gateStartChunkIndex: Int!
+  gateEndChunkIndex: Int!
+  facts: JSON!
+  questions: JSON!
+  createdAt: String!
+  attempts: [QuizAttempt!]!
+}
+
+type QuizAttempt {
+  id: ID!
+  quizId: ID!
+  answers: JSON!
+  correctCount: Int!
+  passed: Boolean!
+  answeredAt: String!
+}
+
+input UpdateProgressInput {
+  bookId: ID!
+  currentChunkIndex: Int!
+  unlockedUntilChunkIndex: Int!
+}
+
+input CreateQuizInput {
+  bookId: ID!
+  gateStartChunkIndex: Int!
+  gateEndChunkIndex: Int!
+}
+
+input SubmitQuizAttemptInput {
+  quizId: ID!
+  answers: JSON!
+}
+
+type Query {
+  books: [Book!]!
+  book(id: ID!): Book
+  bookToc(bookId: ID!): JSON
+  chunks(bookId: ID!, from: Int, limit: Int): [Chunk!]!
+  progress(bookId: ID!): ReadingProgress
+  quizzes(bookId: ID!): [Quiz!]!
+  quiz(id: ID!): Quiz
+}
+
+type Mutation {
+  createSession: Session!
+  addBookToSession(bookId: ID!): SessionBook!
+  updateProgress(input: UpdateProgressInput!): ReadingProgress!
+  createQuiz(input: CreateQuizInput!): Quiz!
+  submitQuizAttempt(input: SubmitQuizAttemptInput!): QuizAttempt!
+}
+
+type SessionBook {
+  sessionId: ID!
+  bookId: ID!
+  addedAt: String!
+}
+
+scalar JSON
+

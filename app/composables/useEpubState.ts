@@ -1,5 +1,12 @@
 import { ref, readonly, computed } from "vue";
-import type { Book, NavItem } from "epubjs";
+import type { NavItem } from "~/types/epub";
+import {
+  graphqlQuery,
+  GET_BOOKS,
+  GET_BOOK,
+  GET_BOOK_TOC,
+  ADD_BOOK_TO_SESSION,
+} from "./useGraphQL";
 
 export interface BookMetadata {
   title: string;
@@ -8,7 +15,6 @@ export interface BookMetadata {
 
 // Shared state - singleton pattern
 const currentBookId = ref<string | null>(null);
-const currentBook = ref<Book | null>(null);
 const metadata = ref<BookMetadata | null>(null);
 const toc = ref<NavItem[] | null>(null);
 const chapterContent = ref<Record<string, string>>({});
@@ -16,7 +22,7 @@ const tocToSpineMap = ref<Record<string, string>>({});
 
 export const useEpubState = () => {
   const loadEpub = async (file: File) => {
-    // Upload file to server first
+    // Upload file to server (handles parsing and DB storage)
     const formData = new FormData();
     formData.append("file", file);
 
@@ -30,65 +36,55 @@ export const useEpubState = () => {
 
     const bookId = uploadResponse.bookId;
 
-    // Parse the book
-    const { parseEpub, extractMetadata, extractToc, renderAllChapters, createTocToSpineMap } =
-      useEpubParser();
-    const book = await parseEpub(file);
-    const bookMetadata = await extractMetadata(book);
-    const bookToc = await extractToc(book);
-    const chapters = await renderAllChapters(book);
-    const tocMap = await createTocToSpineMap(book, bookToc);
+    // Add book to session via GraphQL
+    await graphqlQuery(ADD_BOOK_TO_SESSION, { bookId });
 
-    // Store parsed data on server
-    await $fetch(`/api/books/${bookId}/data`, {
-      method: "POST",
-      body: {
-        metadata: bookMetadata,
-        toc: bookToc,
-        chapterContent: chapters,
-        tocToSpineMap: tocMap,
-      },
-    });
-
-    // Update local state
-    currentBookId.value = bookId;
-    currentBook.value = book;
-    metadata.value = bookMetadata;
-    toc.value = bookToc;
-    chapterContent.value = chapters;
-    tocToSpineMap.value = tocMap;
-
-    // Store bookId in localStorage for persistence
-    if (import.meta.client) {
-      localStorage.setItem("currentBookId", bookId);
-    }
+    // Load book data from GraphQL
+    await loadBookFromServer(bookId);
   };
 
   const loadBookFromServer = async (bookId: string) => {
     try {
-      // Load parsed data from server
-      const data = await $fetch<{
-        metadata: BookMetadata;
-        toc: NavItem[];
-        chapterContent: Record<string, string>;
-        tocToSpineMap: Record<string, string>;
-      }>(`/api/books/${bookId}/data`);
+      // Load book data from GraphQL
+      const bookData = await graphqlQuery<{ book: any }>(GET_BOOK, { id: bookId });
+      const book = bookData.book;
 
-      // Load EPUB file to create Book object
-      const fileResponse = await fetch(`/api/books/${bookId}/file`);
-      const fileBlob = await fileResponse.blob();
-      const file = new File([fileBlob], "book.epub", { type: "application/epub+zip" });
+      if (!book) {
+        throw new Error("Book not found");
+      }
 
-      const { parseEpub } = useEpubParser();
-      const book = await parseEpub(file);
+      // Load TOC
+      const tocData = await graphqlQuery<{ bookToc: NavItem[] }>(GET_BOOK_TOC, {
+        bookId,
+      });
+
+      // Build chapter content from sections
+      const chapters: Record<string, string> = {};
+      const tocMap: Record<string, string> = {};
+
+      for (const section of book.sections || []) {
+        chapters[section.href] = section.html || "";
+      }
+
+      // Build TOC to spine map (simplified - could be enhanced)
+      if (tocData.bookToc && Array.isArray(tocData.bookToc)) {
+        for (const tocItem of tocData.bookToc) {
+          if (tocItem.href) {
+            const normalizedHref = tocItem.href.split("#")[0];
+            tocMap[normalizedHref] = normalizedHref;
+          }
+        }
+      }
 
       // Update local state
       currentBookId.value = bookId;
-      currentBook.value = book;
-      metadata.value = data.metadata;
-      toc.value = data.toc;
-      chapterContent.value = data.chapterContent;
-      tocToSpineMap.value = data.tocToSpineMap;
+      metadata.value = {
+        title: book.title,
+        author: book.author,
+      };
+      toc.value = (tocData.bookToc as NavItem[]) || [];
+      chapterContent.value = chapters;
+      tocToSpineMap.value = tocMap;
 
       // Store bookId in localStorage
       if (import.meta.client) {
@@ -102,7 +98,6 @@ export const useEpubState = () => {
 
   const clearBook = () => {
     currentBookId.value = null;
-    currentBook.value = null;
     metadata.value = null;
     toc.value = null;
     chapterContent.value = {};
@@ -113,7 +108,7 @@ export const useEpubState = () => {
     }
   };
 
-  // Initialize function to load book from storage or .books directory
+  // Initialize function to load book from GraphQL
   const initializeBook = async () => {
     if (import.meta.client && !currentBookId.value) {
       // First try to load from localStorage
@@ -128,22 +123,21 @@ export const useEpubState = () => {
         }
       }
 
-      // If no stored book, load the first available book from .books directory
+      // If no stored book, load the first available book from GraphQL
       try {
-        const bookIds = await $fetch<string[]>("/api/books/list");
-        if (bookIds && bookIds.length > 0) {
+        const booksData = await graphqlQuery<{ books: any[] }>(GET_BOOKS);
+        if (booksData.books && booksData.books.length > 0) {
           // Load the first book
-          await loadBookFromServer(bookIds[0]);
+          await loadBookFromServer(booksData.books[0].id);
         }
       } catch (err) {
-        console.error("Failed to load book from .books directory:", err);
+        console.error("Failed to load books from GraphQL:", err);
       }
     }
   };
 
   return {
     currentBookId: readonly(currentBookId),
-    currentBook: readonly(currentBook),
     metadata: readonly(metadata),
     toc: computed(() => toc.value),
     chapterContent: computed(() => chapterContent.value),

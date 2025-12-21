@@ -1,7 +1,7 @@
 # Nuxt dev/build outputs
 .output
 .data
-.nuxt
+.nuxt/
 .nitro
 .cache
 dist
@@ -32,3 +32,5 @@ logs
 
 # Stored books
 .books
+
+/generated/prisma

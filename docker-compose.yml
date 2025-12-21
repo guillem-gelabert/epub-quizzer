@@ -1,0 +1,55 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: epub-quizzer-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-epubquizzer}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-epubquizzer}
+      POSTGRES_DB: ${POSTGRES_DB:-epubquizzer}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-epubquizzer}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - epub-quizzer-network
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: epub-quizzer-app
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-epubquizzer}:${POSTGRES_PASSWORD:-epubquizzer}@postgres:5432/${POSTGRES_DB:-epubquizzer}?schema=public
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      NODE_ENV: production
+      PORT: 3000
+      HOST: 0.0.0.0
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./prompts:/app/prompts:ro
+    networks:
+      - epub-quizzer-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/api/graphql"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  postgres_data:
+
+networks:
+  epub-quizzer-network:
+    driver: bridge
+
