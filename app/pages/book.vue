@@ -36,23 +36,38 @@
               <ul class="toc-list">
                 <li v-for="item in toc" :key="item.id" class="toc-item">
                   <NuxtLink
-                    v-if="item.href"
-                    :to="`/chapter/${encodeURIComponent(normalizeHref(item.href))}`"
+                    v-if="item.href && !item.subitems?.length"
+                    :to="`/chapter/${encodeURIComponent(
+                      normalizeHref(item.href)
+                    )}`"
                     class="toc-link"
                   >
-                    {{ item.label || 'Untitled' }}
+                    {{ item.label || "Untitled" }}
                   </NuxtLink>
-                  <span v-else class="toc-label">{{ item.label || 'Untitled' }}</span>
-                  <ul v-if="item.subitems && item.subitems.length > 0" class="toc-sublist">
-                    <li v-for="subitem in item.subitems" :key="subitem.id" class="toc-subitem">
+                  <span v-else class="toc-label">{{
+                    item.label || "Untitled"
+                  }}</span>
+                  <ul
+                    v-if="item.subitems && item.subitems.length > 0"
+                    class="toc-sublist"
+                  >
+                    <li
+                      v-for="subitem in item.subitems"
+                      :key="subitem.id"
+                      class="toc-subitem"
+                    >
                       <NuxtLink
                         v-if="subitem.href"
-                        :to="`/chapter/${encodeURIComponent(normalizeHref(subitem.href))}`"
+                        :to="`/chapter/${encodeURIComponent(
+                          normalizeHref(subitem.href)
+                        )}`"
                         class="toc-link toc-sublink"
                       >
-                        {{ subitem.label || 'Untitled' }}
+                        {{ subitem.label || "Untitled" }}
                       </NuxtLink>
-                      <span v-else class="toc-label">{{ subitem.label || 'Untitled' }}</span>
+                      <span v-else class="toc-label">{{
+                        subitem.label || "Untitled"
+                      }}</span>
                     </li>
                   </ul>
                 </li>
@@ -66,7 +81,7 @@
               :disabled="reloading"
               class="px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {{ reloading ? 'Reloading...' : 'Reload Book' }}
+              {{ reloading ? "Reloading..." : "Reload Book" }}
             </button>
             <NuxtLink
               to="/library"
@@ -90,13 +105,13 @@ const reloadBook = async () => {
   if (!currentBookId.value || reloading.value) {
     return;
   }
-  
+
   try {
     reloading.value = true;
     await loadBookFromServer(currentBookId.value);
   } catch (error) {
-    console.error('Failed to reload book:', error);
-    alert('Failed to reload book. Please try again.');
+    console.error("Failed to reload book:", error);
+    alert("Failed to reload book. Please try again.");
   } finally {
     reloading.value = false;
   }
@@ -104,8 +119,10 @@ const reloadBook = async () => {
 
 // Normalize href: remove fragment and ensure leading slash
 const normalizeHref = (href: string): string => {
-  const withoutFragment = href.split('#')[0] || href;
-  return withoutFragment.startsWith('/') ? withoutFragment : `/${withoutFragment}`;
+  const withoutFragment = href.split("#")[0] || href;
+  return withoutFragment.startsWith("/")
+    ? withoutFragment
+    : `/${withoutFragment}`;
 };
 </script>
 

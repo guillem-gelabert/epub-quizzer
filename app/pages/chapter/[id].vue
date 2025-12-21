@@ -7,6 +7,23 @@
       <p class="text-gray-600">Loading chapter...</p>
     </div>
     <div v-else class="chapter-wrapper">
+      <!-- Vertical breadcrumbs -->
+      <div class="breadcrumbs-container">
+        <div class="breadcrumbs-track">
+          <div
+            v-for="(item, index) in displayItems"
+            :key="index"
+            class="breadcrumb-dot"
+            :class="{
+              'breadcrumb-read': readItems.has(index),
+              'breadcrumb-current': index === currentItemIndex,
+            }"
+            :style="{
+              top: `${(index / Math.max(displayItems.length - 1, 1)) * 100}%`,
+            }"
+          ></div>
+        </div>
+      </div>
       <div
         ref="scrollContainer"
         class="scroll-container"
@@ -49,6 +66,21 @@
                     ['A', 'B', 'C'].indexOf(item.questionData.correct_choice)
                   "
                   :question-id="`${item.questionGateIndex}-${item.questionInGateIndex}`"
+                  :gate-index="item.questionGateIndex!"
+                  :question-in-gate-index="item.questionInGateIndex!"
+                  :is-current-question="
+                    (currentQuestionIndex.get(item.questionGateIndex!) ?? 0) ===
+                    item.questionInGateIndex
+                  "
+                  :total-questions-in-gate="
+                    generatedQuestions.get(item.questionGateIndex!)?.length ?? 0
+                  "
+                  :existing-answer="
+                    questionAnswers.get(
+                      `${item.questionGateIndex}-${item.questionInGateIndex}`
+                    )
+                  "
+                  @answer-submitted="handleQuestionAnswerSubmitted"
                 />
               </template>
             </div>
@@ -63,6 +95,14 @@
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from "vue";
 import type { ReaderState, Chunk } from "~/composables/useOpenAi";
 import type { McqQuestion } from "~/composables/useQuizGenerator";
+import {
+  graphqlQuery,
+  graphqlMutation,
+  GET_CHUNKS,
+  GET_PROGRESS,
+  UPDATE_PROGRESS,
+  GET_BOOK,
+} from "~/composables/useGraphQL";
 
 const route = useRoute();
 const { toc, chapterContent, tocToSpineMap, currentBookId } = useEpubState();
@@ -74,9 +114,22 @@ const answeredQuestions = ref<Set<number>>(new Set());
 const selectedAnswers = ref<Map<number, string>>(new Map()); // Changed to string for "A" | "B" | "C"
 // Track answers per question (gateIndex-questionIndex -> answer)
 const questionAnswers = ref<Map<string, string>>(new Map());
-const selectedAnswer = ref<string | null>(null);
 const currentItemIndex = ref<number>(0);
 const readItems = ref<Set<number>>(new Set());
+// Track paragraph indices that have been read (for mapping to chunks)
+const readParagraphIndices = ref<Set<number>>(new Set());
+// Store chunks from server for mapping
+const serverChunks = ref<
+  Array<{
+    id: string;
+    chunkIndex: number;
+    text: string;
+    wordCount: number;
+    sectionIndex: number;
+  }>
+>([]);
+// Store current section index for the chapter
+const currentSectionIndex = ref<number | null>(null);
 
 // Gate positions pre-calculated when chapter loads
 const gatePositions = ref<
@@ -292,9 +345,13 @@ const generateQuestionsForGate = async (
     }
 
     // Calculate chunk indices for the gate
-    // For now, use paragraph indices as chunk indices (simplified)
-    const gateStartChunkIndex = gate.startParagraphIndex;
-    const gateEndChunkIndex = gate.endParagraphIndex;
+    // Map paragraph indices to global chunk indices
+    const gateStartChunkIndex = paragraphIndexToGlobalChunkIndex(
+      gate.startParagraphIndex
+    );
+    const gateEndChunkIndex = paragraphIndexToGlobalChunkIndex(
+      gate.endParagraphIndex
+    );
 
     const quizPromise = generateQuiz({
       bookId: currentBookId.value,
@@ -379,10 +436,7 @@ const displayItems = computed<DisplayItem[]>(() => {
             questionGateIndex: gate.gateIndex,
             questionInGateIndex: qIdx,
             questionData: question,
-            selectedAnswer:
-              isCurrent && !isAnswered
-                ? selectedAnswer.value || undefined
-                : answer,
+            selectedAnswer: answer,
             isCorrect: answer ? answer === question.correct_choice : undefined,
           });
         });
@@ -406,6 +460,48 @@ const totalContentHeight = computed(() => {
   // Total height is number of display items * 100vh (each item takes full viewport height)
   return displayItems.value.length * 100;
 });
+
+// Computed: Get highest read paragraph index
+const highestReadParagraphIndex = computed(() => {
+  if (readParagraphIndices.value.size === 0) {
+    return -1;
+  }
+  return Math.max(...Array.from(readParagraphIndices.value));
+});
+
+// Map paragraph index to global chunk index
+const paragraphIndexToGlobalChunkIndex = (paragraphIndex: number): number => {
+  // If we have chunks loaded and know the current section
+  if (serverChunks.value.length > 0 && currentSectionIndex.value !== null) {
+    // Find chunks for the current section
+    const sectionChunks = serverChunks.value.filter(
+      (c) => c.sectionIndex === currentSectionIndex.value
+    );
+
+    if (sectionChunks.length > 0) {
+      // Sort by chunkIndex to ensure order
+      sectionChunks.sort((a, b) => a.chunkIndex - b.chunkIndex);
+
+      // Map paragraph index to chunk index within the section
+      // Since paragraphs may not map 1:1 to chunks, use a simple approximation:
+      // paragraph index maps to chunk index within section, then add the starting global chunk index
+      const chunkIndexInSection = Math.min(
+        paragraphIndex,
+        sectionChunks.length - 1
+      );
+      const matchingChunk = sectionChunks[chunkIndexInSection];
+      return matchingChunk?.chunkIndex ?? sectionChunks[0]?.chunkIndex ?? 0;
+    }
+  }
+
+  // Fallback: if no chunks loaded, return paragraph index (will be wrong but won't crash)
+  return paragraphIndex;
+};
+
+// Map paragraph index to chunk index using gate positions and server chunks (legacy, kept for compatibility)
+const paragraphIndexToChunkIndex = (paragraphIndex: number): number => {
+  return paragraphIndexToGlobalChunkIndex(paragraphIndex);
+};
 
 // Watch for changes and update maxScrollHeight
 watch(
@@ -526,35 +622,26 @@ const handleScrollIndicator = () => {
   currentItemIndex.value = closestIndex;
 
   // Mark all items before current as read
+  let paragraphCount = 0;
   for (let i = 0; i < closestIndex; i++) {
     readItems.value.add(i);
-  }
-};
 
-const handleOptionSelect = async (
-  choiceKey: string,
-  gateIndex?: number,
-  questionInGateIndex?: number
-) => {
-  // Only update selectedAnswer if this is the current question
-  if (gateIndex !== undefined && questionInGateIndex !== undefined) {
-    const currentQIndex = currentQuestionIndex.value.get(gateIndex) ?? 0;
-    if (questionInGateIndex === currentQIndex) {
-      selectedAnswer.value = choiceKey;
-      // Auto-submit the answer immediately
-      await handleAnswerSubmit(gateIndex, questionInGateIndex);
+    // Also track paragraph indices (not questions)
+    const item = displayItems.value[i];
+    if (item && item.type === "paragraph") {
+      readParagraphIndices.value.add(paragraphCount);
+      paragraphCount++;
     }
   }
 };
 
-const handleAnswerSubmit = async (
-  gateIndex: number,
-  questionInGateIndex: number
-) => {
-  // Use the current selected answer
-  if (selectedAnswer.value === null) {
-    return;
-  }
+const handleQuestionAnswerSubmitted = async (event: {
+  gateIndex: number;
+  questionInGateIndex: number;
+  answer: string;
+  choiceIndex: number;
+}) => {
+  const { gateIndex, questionInGateIndex, answer } = event;
 
   const questions = generatedQuestions.value.get(gateIndex) || [];
   const currentQuestion = questions[questionInGateIndex];
@@ -565,10 +652,7 @@ const handleAnswerSubmit = async (
 
   // Store the answer for this specific question
   const answerKey = `${gateIndex}-${questionInGateIndex}`;
-  questionAnswers.value.set(answerKey, selectedAnswer.value);
-
-  // Note: Quiz attempts can be submitted via GraphQL when gate is complete
-  // Answers are stored in component state for now
+  questionAnswers.value.set(answerKey, answer);
 
   // Check if there are more questions in this gate
   const hasMoreQuestions = questionInGateIndex < questions.length - 1;
@@ -576,7 +660,6 @@ const handleAnswerSubmit = async (
   if (hasMoreQuestions) {
     // Move to next question in the gate
     currentQuestionIndex.value.set(gateIndex, questionInGateIndex + 1);
-    selectedAnswer.value = null;
 
     // Auto-scroll to next question in sequence
     setTimeout(() => {
@@ -616,6 +699,38 @@ const handleAnswerSubmit = async (
 
   answeredQuestions.value.add(gateIndex);
 
+  // Mark all paragraphs up to the end of this gate as read (if not already read)
+  const gate = gatePositions.value.find((g) => g.gateIndex === gateIndex);
+  if (gate) {
+    // Mark paragraphs up to gate end as read
+    for (
+      let i = 0;
+      i <= gate.endParagraphIndex && i < paragraphs.value.length;
+      i++
+    ) {
+      readParagraphIndices.value.add(i);
+    }
+
+    // Also mark corresponding display items as read
+    let paragraphCount = 0;
+    for (
+      let displayItemIndex = 0;
+      displayItemIndex < displayItems.value.length;
+      displayItemIndex++
+    ) {
+      const item = displayItems.value[displayItemIndex];
+      if (item && item.type === "paragraph") {
+        if (paragraphCount <= gate.endParagraphIndex) {
+          readItems.value.add(displayItemIndex);
+        }
+        paragraphCount++;
+      }
+    }
+  }
+
+  // Sync read progress to server after gate completion
+  await syncProgressToServer();
+
   // Generate questions for next gate if available
   const nextGateIndex = gateIndex + 1;
   if (nextGateIndex < gatePositions.value.length) {
@@ -633,12 +748,194 @@ const handleAnswerSubmit = async (
       );
     }
   }
-
-  // Reset selected answer
-  selectedAnswer.value = null;
 };
 
-const loadChapterContent = () => {
+// Sync progress to server
+const syncProgressToServer = async () => {
+  if (!currentBookId.value) {
+    console.warn("Cannot sync progress: no book ID");
+    return;
+  }
+
+  try {
+    // Get highest read paragraph index
+    const highestParagraphIndex = highestReadParagraphIndex.value;
+
+    // If no paragraphs read yet, use 0 as minimum
+    const paragraphIndexToSync = Math.max(0, highestParagraphIndex);
+
+    // Map to chunk index using the mapping function
+    const chunkIndex = paragraphIndexToChunkIndex(paragraphIndexToSync);
+
+    console.log("Syncing progress to server:", {
+      highestParagraphIndex,
+      paragraphIndexToSync,
+      chunkIndex,
+      bookId: currentBookId.value,
+    });
+
+    // Update progress on server
+    const result = await graphqlMutation(UPDATE_PROGRESS, {
+      input: {
+        bookId: currentBookId.value,
+        currentChunkIndex: chunkIndex,
+        unlockedUntilChunkIndex: chunkIndex,
+      },
+    });
+
+    console.log("Progress synced successfully:", result);
+  } catch (error) {
+    console.error("Failed to sync progress to server:", error);
+  }
+};
+
+// Load chunks from server for mapping
+const loadChunks = async () => {
+  if (!currentBookId.value) {
+    return;
+  }
+
+  try {
+    // Load all chunks (or at least enough to map paragraphs)
+    const chunksData = await graphqlQuery<{
+      chunks: Array<{
+        id: string;
+        chunkIndex: number;
+        text: string;
+        wordCount: number;
+        sectionIndex: number;
+      }>;
+    }>(GET_CHUNKS, {
+      bookId: currentBookId.value,
+      from: 0,
+      limit: 10000, // Load enough chunks to cover all sections
+    });
+    serverChunks.value = chunksData.chunks || [];
+
+    // Find the current section index based on the chapter href
+    const hrefParam = route.params.id;
+    const decodedHref =
+      typeof hrefParam === "string"
+        ? decodeURIComponent(hrefParam)
+        : Array.isArray(hrefParam)
+        ? decodeURIComponent(hrefParam.join("/"))
+        : "";
+    const normalizedHref = normalizeHref(decodedHref);
+
+    // Find section by matching href - we need to get sections from the book
+    const bookData = await graphqlQuery<{
+      book: { sections: Array<{ href: string; sectionIndex: number }> };
+    }>(GET_BOOK, { id: currentBookId.value });
+
+    if (bookData.book?.sections) {
+      const matchingSection = bookData.book.sections.find(
+        (s) => normalizeHref(s.href) === normalizedHref
+      );
+      if (matchingSection) {
+        currentSectionIndex.value = matchingSection.sectionIndex;
+      }
+    }
+  } catch (error) {
+    console.error("Failed to load chunks:", error);
+  }
+};
+
+// Load progress from server and mark paragraphs as read
+const loadProgressFromServer = async () => {
+  if (!currentBookId.value) {
+    return;
+  }
+
+  try {
+    const progressData = await graphqlQuery<{
+      progress: { unlockedUntilChunkIndex: number } | null;
+    }>(GET_PROGRESS, {
+      bookId: currentBookId.value,
+    });
+
+    if (progressData.progress) {
+      const unlockedChunkIndex = progressData.progress.unlockedUntilChunkIndex;
+
+      // Only mark paragraphs as read if we have a current section and chunks loaded
+      if (currentSectionIndex.value !== null && serverChunks.value.length > 0) {
+        // Find chunks that belong to the current section
+        const sectionChunks = serverChunks.value
+          .filter((c) => c.sectionIndex === currentSectionIndex.value)
+          .sort((a, b) => a.chunkIndex - b.chunkIndex);
+
+        // Find the highest chunk index in this section that is <= unlockedChunkIndex
+        const highestChunkInSection = sectionChunks
+          .filter((c) => c.chunkIndex <= unlockedChunkIndex)
+          .sort((a, b) => b.chunkIndex - a.chunkIndex)[0];
+
+        // If we found a chunk in this section that's <= unlockedChunkIndex,
+        // map it to a paragraph index within this section
+        if (highestChunkInSection) {
+          // Find the index of this chunk within the section's chunks
+          const chunkIndexInSection = sectionChunks.findIndex(
+            (c) => c.chunkIndex === highestChunkInSection.chunkIndex
+          );
+
+          // Map chunk index in section to paragraph index
+          // Use a simple approximation: chunk index in section maps to paragraph index
+          // Cap at the number of paragraphs in this section
+          let maxParagraphIndex = Math.min(
+            chunkIndexInSection,
+            paragraphs.value.length - 1
+          );
+
+          // Also check gate positions to find a better mapping
+          for (const gate of gatePositions.value) {
+            // If the gate's end paragraph is within reasonable range, use it
+            if (gate.endParagraphIndex <= maxParagraphIndex + 5) {
+              maxParagraphIndex = Math.max(
+                maxParagraphIndex,
+                gate.endParagraphIndex
+              );
+            }
+          }
+
+          // Cap at actual paragraph count
+          maxParagraphIndex = Math.min(
+            maxParagraphIndex,
+            paragraphs.value.length - 1
+          );
+
+          // Mark paragraphs as read up to maxParagraphIndex
+          for (
+            let i = 0;
+            i <= maxParagraphIndex && i < paragraphs.value.length;
+            i++
+          ) {
+            readParagraphIndices.value.add(i);
+          }
+
+          // Mark corresponding display items as read
+          let paragraphCount = 0;
+          for (
+            let displayItemIndex = 0;
+            displayItemIndex < displayItems.value.length;
+            displayItemIndex++
+          ) {
+            const item = displayItems.value[displayItemIndex];
+            if (item && item.type === "paragraph") {
+              if (paragraphCount <= maxParagraphIndex) {
+                readItems.value.add(displayItemIndex);
+              }
+              paragraphCount++;
+            }
+          }
+        } else {
+          // No chunks in this section are unlocked yet, don't mark anything as read
+        }
+      }
+    }
+  } catch (error) {
+    console.error("Failed to load progress from server:", error);
+  }
+};
+
+const loadChapterContent = async () => {
   if (!import.meta.client) return;
 
   const hrefParam = route.params.id;
@@ -692,6 +989,10 @@ const loadChapterContent = () => {
 
     // Pre-calculate all gate positions
     precalculateGates();
+
+    // Load chunks and progress from server
+    await loadChunks();
+    await loadProgressFromServer();
 
     // Generate questions for first gate immediately
     if (gatePositions.value.length > 0) {
@@ -792,7 +1093,9 @@ watch(
   () => route.params.id,
   async () => {
     paragraphs.value = [];
-    selectedAnswer.value = null; // Reset selected answer on route change
+    readItems.value.clear();
+    readParagraphIndices.value.clear();
+    currentSectionIndex.value = null; // Reset section index on route change
     // Wait for content to be available
     await nextTick();
     if (Object.keys(chapterContent.value).length > 0) {
@@ -811,24 +1114,6 @@ watch(
       );
     }
   }
-);
-
-// Watch displayItems to initialize selectedAnswer when a question with existing answer is shown
-watch(
-  () => displayItems.value,
-  (items) => {
-    // Find the first question item that has a selectedAnswer
-    const questionItem = items.find(
-      (item) =>
-        item.type === "question" &&
-        item.questionGateIndex !== undefined &&
-        item.selectedAnswer !== undefined
-    );
-    if (questionItem && questionItem.selectedAnswer) {
-      selectedAnswer.value = questionItem.selectedAnswer;
-    }
-  },
-  { deep: true, immediate: true }
 );
 </script>
 
@@ -1052,5 +1337,41 @@ watch(
   width: 12px;
   height: 12px;
   box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.2);
+}
+
+.breadcrumbs-container {
+  position: fixed;
+  right: 1rem;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 10000000;
+  pointer-events: none;
+}
+
+.breadcrumbs-track {
+  position: relative;
+  height: 90vh;
+}
+
+.breadcrumb-dot {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 8px;
+  height: 2px;
+  background-color: #d1d5db;
+  transition: all 0.2s ease;
+  pointer-events: none;
+}
+
+.breadcrumb-dot.breadcrumb-read {
+  background-color: #6b7280;
+}
+
+.breadcrumb-dot.breadcrumb-current {
+  width: 12px;
+  height: 2px;
+  background-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
 }
 </style>

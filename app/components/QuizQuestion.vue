@@ -15,8 +15,9 @@
           :name="`question-${questionId}`"
           :value="index"
           :checked="selectedAnswer === index"
-          @change="selectedAnswer = index"
+          @change="handleAnswerSelect(index)"
           class="radio-input"
+          :disabled="isAnswered"
         />
         <span class="radio-text"
           >{{ getChoiceLabel(index) }}. {{ answer }}</span
@@ -27,21 +28,79 @@
 </template>
 
 <script setup lang="ts">
+import { ref, watch } from "vue";
 interface Props {
   question: string;
   answers: Array<string>;
   correctIndex: number;
   questionId?: string | number;
+  gateIndex: number;
+  questionInGateIndex: number;
+  isCurrentQuestion: boolean;
+  totalQuestionsInGate: number;
+  existingAnswer?: string | null;
 }
 
 const props = withDefaults(defineProps<Props>(), {
   questionId: () => Math.random().toString(36).substring(7),
+  existingAnswer: null,
 });
 
-const selectedAnswer = ref<number | null>(null);
+const emit = defineEmits<{
+  answerSubmitted: [
+    {
+      gateIndex: number;
+      questionInGateIndex: number;
+      answer: string;
+      choiceIndex: number;
+    }
+  ];
+}>();
+
+const selectedAnswer = ref<number | null>(
+  props.existingAnswer !== null && props.existingAnswer !== undefined
+    ? ["A", "B", "C"].indexOf(props.existingAnswer)
+    : null
+);
+const isAnswered = ref(props.existingAnswer !== null && props.existingAnswer !== undefined);
+
+// Watch for changes to existingAnswer prop
+watch(
+  () => props.existingAnswer,
+  (newAnswer) => {
+    if (newAnswer !== null && newAnswer !== undefined) {
+      selectedAnswer.value = ["A", "B", "C"].indexOf(newAnswer);
+      isAnswered.value = true;
+    } else {
+      selectedAnswer.value = null;
+      isAnswered.value = false;
+    }
+  }
+);
 
 const getChoiceLabel = (index: number): string => {
   return String.fromCharCode(65 + index); // A, B, C, D, etc.
+};
+
+const handleAnswerSelect = async (choiceIndex: number) => {
+  // Only process if this is the current question and not already answered
+  if (!props.isCurrentQuestion || isAnswered.value) {
+    return;
+  }
+
+  selectedAnswer.value = choiceIndex;
+  const answerKey = getChoiceLabel(choiceIndex);
+
+  // Mark as answered immediately
+  isAnswered.value = true;
+
+  // Emit the answer to parent
+  emit("answerSubmitted", {
+    gateIndex: props.gateIndex,
+    questionInGateIndex: props.questionInGateIndex,
+    answer: answerKey,
+    choiceIndex,
+  });
 };
 </script>
 
