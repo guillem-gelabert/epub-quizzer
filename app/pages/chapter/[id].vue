@@ -1,7 +1,7 @@
 <template>
   <div class="chapter-container">
     <div
-      v-if="paragraphs.length === 0"
+      v-if="!paragraphs"
       class="flex items-center justify-center min-h-screen"
     >
       <p class="text-gray-600">Loading chapter...</p>
@@ -467,11 +467,14 @@ const extractParagraphs = (html: string): string[] => {
 
   // Get all first level children of the body
   const elements = Array.from(doc.body.children.item(0)?.children || []);
-  console.log(elements);
+
   const extracted: string[] = [];
 
   elements.forEach((el) => {
     const text = el.textContent?.trim();
+
+    // TODO: Handle images
+
     if (text && text.length > 0) {
       // Preserve the HTML structure for the paragraph
       extracted.push(el.outerHTML);
