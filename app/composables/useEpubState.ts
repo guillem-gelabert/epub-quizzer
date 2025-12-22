@@ -1,5 +1,5 @@
 import { ref, readonly, computed } from "vue";
-import type { NavItem } from "~/types/epub";
+import type { NavItem, BookMetadata } from "~/types/epub";
 import {
   graphqlQuery,
   GET_BOOKS,
@@ -7,11 +7,6 @@ import {
   GET_BOOK_TOC,
   ADD_BOOK_TO_SESSION,
 } from "./useGraphQL";
-
-export interface BookMetadata {
-  title: string;
-  author: string;
-}
 
 // Shared state - singleton pattern
 const currentBookId = ref<string | null>(null);
