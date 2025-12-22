@@ -48,6 +48,7 @@ RUN npm ci --only=production && \
 # Copy built application from builder
 COPY --from=builder /app/.output ./.output
 COPY --from=builder /app/prompts ./prompts
+COPY --from=builder /app/generated ./generated
 
 # Create non-root user
 RUN groupadd --system --gid 1001 nodejs && \
