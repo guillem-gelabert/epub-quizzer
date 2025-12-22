@@ -10,30 +10,10 @@ import {
   extractCover,
 } from "../../utils/epubParser";
 import { chunkHtml } from "../../utils/chunking";
-// #region agent log
-const LOG_ENDPOINT = "http://127.0.0.1:7244/ingest/642041a2-ed65-4e16-a8dd-b3388fad7fb0";
-const log = async (h, l, m, d) => {
-  try {
-    await fetch(LOG_ENDPOINT, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({id: `log_${Date.now()}_${Math.random().toString(36).substr(2,9)}`, timestamp: Date.now(), location: l, message: m, data: d, sessionId: "debug-session", runId: "run1", hypothesisId: h})}).catch(()=>{});
-  } catch {}
-};
-// #endregion
-
 
 export default defineEventHandler(async (event) => {
-  // #region agent log
-  await log("C", "load-from-directory.ts:entry", "endpoint entry", {});
-  // #endregion
-
   // Get session ID from context (set by middleware)
   const sessionId = event.context.sessionId;
-  // #region agent log
-  await log("A", "load-from-directory.ts:session", "session check", {hasSessionId: !!sessionId, sessionId});
-  // #endregion
-  // #region agent log
-  await log("A", "load-from-directory.ts:session", "session check", {hasSessionId: !!sessionId, sessionId});
-  // #endregion
-
   if (!sessionId) {
     throw createError({
       statusCode: 401,
@@ -45,11 +25,7 @@ export default defineEventHandler(async (event) => {
 
   // Check if .books directory exists
   if (!existsSync(booksDir)) {
-    // #region agent log
-  await log("C", "load-from-directory.ts:exit", "endpoint exit", {loadedCount: loaded.length, errorsCount: errors.length});
-  // #endregion
-
-  return {
+    return {
       message: ".books directory not found",
       loaded: [],
       errors: [],
@@ -61,11 +37,7 @@ export default defineEventHandler(async (event) => {
   const epubFiles = files.filter((file) => file.endsWith(".epub"));
 
   if (epubFiles.length === 0) {
-    // #region agent log
-  await log("C", "load-from-directory.ts:exit", "endpoint exit", {loadedCount: loaded.length, errorsCount: errors.length});
-  // #endregion
-
-  return {
+    return {
       message: "No EPUB files found in .books directory",
       loaded: [],
       errors: [],
@@ -197,10 +169,6 @@ export default defineEventHandler(async (event) => {
       console.error(`Failed to load book ${filename}:`, error);
     }
   }
-
-  // #region agent log
-  await log("C", "load-from-directory.ts:exit", "endpoint exit", {loadedCount: loaded.length, errorsCount: errors.length});
-  // #endregion
 
   return {
     message: `Processed ${epubFiles.length} EPUB file(s)`,

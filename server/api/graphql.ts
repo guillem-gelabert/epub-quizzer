@@ -4,31 +4,98 @@ import { join } from "node:path";
 import { resolvers } from "../graphql/resolvers";
 import { createContext } from "../graphql/context";
 
-const typeDefs = readFileSync(
-  join(process.cwd(), "server/graphql/schema.graphql"),
-  "utf-8"
-);
+// #region agent log
+const LOG_ENDPOINT = "http://127.0.0.1:7245/ingest/2fc64e3d-fe57-477f-9bb1-fd781caa27df";
+const LOG_FILE = "/Users/guillem/projects/guillem/epub-quizzer/.cursor/debug.log";
+const log = async (h: string, l: string, m: string, d: any) => {
+  const entry = JSON.stringify({id: `log_${Date.now()}_${Math.random().toString(36).substr(2,9)}`, timestamp: Date.now(), location: l, message: m, data: d, sessionId: "debug-session", runId: "server-debug", hypothesisId: h}) + "\n";
+  try {
+    await fetch(LOG_ENDPOINT, {method: "POST", headers: {"Content-Type": "application/json"}, body: entry.trim()}).catch(()=>{});
+  } catch {}
+  try {
+    const fs = await import("node:fs/promises");
+    await fs.appendFile(LOG_FILE, entry).catch(()=>{});
+  } catch {}
+  console.error(`[DEBUG ${h}] ${l}: ${m}`, d);
+};
+// #endregion
 
-const server = new ApolloServer({
-  typeDefs,
-  resolvers,
-  csrfPrevention: false, // Disable CSRF protection for same-origin requests
-});
+// #region agent log
+log("C", "graphql.ts:module-init", "GraphQL module initialization", {cwd: process.cwd(), nodeEnv: process.env.NODE_ENV, hasDatabaseUrl: !!process.env.DATABASE_URL}).catch(()=>{});
+// #endregion
 
-// Start the server
-const serverPromise = server.start();
+let typeDefs: string;
+try {
+  // #region agent log
+  const schemaPath = join(process.cwd(), "server/graphql/schema.graphql");
+  log("C", "graphql.ts:schema-read:before", "reading schema file", {schemaPath, cwd: process.cwd()}).catch(()=>{});
+  // #endregion
+  typeDefs = readFileSync(schemaPath, "utf-8");
+  // #region agent log
+  log("C", "graphql.ts:schema-read:after", "schema file read", {typeDefsLength: typeDefs.length}).catch(()=>{});
+  // #endregion
+} catch (error) {
+  // #region agent log
+  log("C", "graphql.ts:schema-read:error", "schema file read error", {error: error instanceof Error ? error.message : String(error), stack: error instanceof Error ? error.stack : undefined}).catch(()=>{});
+  // #endregion
+  throw error;
+}
+
+let server: ApolloServer;
+let serverPromise: Promise<void>;
+try {
+  // #region agent log
+  log("C", "graphql.ts:apollo-init:before", "creating Apollo Server", {hasTypeDefs: !!typeDefs, hasResolvers: !!resolvers}).catch(()=>{});
+  // #endregion
+  server = new ApolloServer({
+    typeDefs,
+    resolvers,
+    csrfPrevention: false, // Disable CSRF protection for same-origin requests
+  });
+  // #region agent log
+  log("C", "graphql.ts:apollo-init:after", "Apollo Server created", {}).catch(()=>{});
+  // #endregion
+  
+  // Start the server
+  // #region agent log
+  log("C", "graphql.ts:apollo-start:before", "starting Apollo Server", {}).catch(()=>{});
+  // #endregion
+  serverPromise = server.start();
+  // #region agent log
+  log("C", "graphql.ts:apollo-start:after", "Apollo Server start initiated", {}).catch(()=>{});
+  // #endregion
+} catch (error) {
+  // #region agent log
+  log("C", "graphql.ts:apollo-init:error", "Apollo Server initialization error", {error: error instanceof Error ? error.message : String(error), stack: error instanceof Error ? error.stack : undefined}).catch(()=>{});
+  // #endregion
+  throw error;
+}
 
 export default defineEventHandler(async (event) => {
   // #region agent log
-  console.log('[DEBUG] GraphQL request received:', {
-    method: event.method,
-    path: event.path,
-    hasBody: !!event.node.req.readable
-  });
+  await log("D", "graphql.ts:handler:entry", "GraphQL request received", {method: event.method, path: event.path, hasBody: !!event.node.req.readable});
   // #endregion
   
   // Wait for server to start
-  await serverPromise;
+  try {
+    // #region agent log
+    await log("D", "graphql.ts:handler:server-wait:before", "waiting for Apollo Server", {});
+    // #endregion
+    await serverPromise;
+    // #region agent log
+    await log("D", "graphql.ts:handler:server-wait:after", "Apollo Server ready", {});
+    // #endregion
+  } catch (error) {
+    // #region agent log
+    await log("D", "graphql.ts:handler:server-wait:error", "Apollo Server start error", {error: error instanceof Error ? error.message : String(error), stack: error instanceof Error ? error.stack : undefined});
+    // #endregion
+    setResponseStatus(event, 500);
+    return JSON.stringify({
+      errors: [{
+        message: `Apollo Server failed to start: ${error instanceof Error ? error.message : String(error)}`
+      }]
+    });
+  }
 
   // Get the request body - Apollo Server expects a parsed JSON object
   let body: any = {};
@@ -128,9 +195,20 @@ export default defineEventHandler(async (event) => {
       },
       context: async () => {
         // #region agent log
-        console.log('[DEBUG] Creating GraphQL context');
+        await log("D", "graphql.ts:handler:context:before", "creating GraphQL context", {});
         // #endregion
-        return createContext(event);
+        try {
+          const ctx = await createContext(event);
+          // #region agent log
+          await log("D", "graphql.ts:handler:context:after", "GraphQL context created", {hasPrisma: !!ctx.prisma, hasSessionId: !!ctx.sessionId});
+          // #endregion
+          return ctx;
+        } catch (error) {
+          // #region agent log
+          await log("D", "graphql.ts:handler:context:error", "GraphQL context creation error", {error: error instanceof Error ? error.message : String(error), stack: error instanceof Error ? error.stack : undefined});
+          // #endregion
+          throw error;
+        }
       },
     });
 
@@ -170,10 +248,12 @@ export default defineEventHandler(async (event) => {
     }
   } catch (error) {
     // #region agent log
-    console.error('[DEBUG] GraphQL handler error:', {
+    await log("D", "graphql.ts:handler:error", "GraphQL handler error", {
       error: error instanceof Error ? error.message : String(error),
+      errorName: error instanceof Error ? error.name : typeof error,
       stack: error instanceof Error ? error.stack : undefined,
-      errorName: error instanceof Error ? error.name : typeof error
+      errorString: String(error),
+      errorKeys: error && typeof error === 'object' ? Object.keys(error) : []
     });
     // #endregion
     
