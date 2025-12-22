@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y \
 # Copy package files
 COPY package*.json ./
 COPY prisma ./prisma/
+COPY prisma.config.ts ./
 
 # Install dependencies
 RUN npm ci
