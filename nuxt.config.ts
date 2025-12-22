@@ -9,19 +9,10 @@ export default defineNuxtConfig({
   modules: ["@nuxtjs/tailwindcss"],
   css: ["~/assets/css/main.css", "~/assets/css/stylesheet.css"],
   nitro: {
-    experimental: {
-      wasm: true,
+    externals: {
+      trace: false,
+      include: ["@prisma/client"],
     },
-  },
-  vite: {
-    // ssr: {
-    //   // Don't bundle epub2 for SSR - it's server-only Node.js package
-    //   noExternal: [],
-    // },
-    // optimizeDeps: {
-    //   // Exclude epub2 from client-side optimization
-    //   exclude: ["epub2"],
-    // },
   },
   typescript: {
     tsConfig: {

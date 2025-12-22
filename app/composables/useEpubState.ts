@@ -41,7 +41,9 @@ export const useEpubState = () => {
   const loadBookFromServer = async (bookId: string) => {
     try {
       // Load book data from GraphQL
-      const bookData = await graphqlQuery<{ book: any }>(GET_BOOK, { id: bookId });
+      const bookData = await graphqlQuery<{ book: any }>(GET_BOOK, {
+        id: bookId,
+      });
       const book = bookData.book;
 
       if (!book) {

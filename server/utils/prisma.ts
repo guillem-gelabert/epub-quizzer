@@ -1,29 +1,17 @@
-import { PrismaClient } from "../../generated/prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
-import { Pool } from "pg";
+import { PrismaClient } from "../../generated/prisma/client";
 
-const globalForPrisma = globalThis as unknown as {
-  prisma: PrismaClient | undefined;
+const prismaClientSingleton = () => {
+  const pool = new PrismaPg({ connectionString: process.env.DATABASE_URL });
+  return new PrismaClient({ adapter: pool });
 };
 
-// Create PostgreSQL connection pool
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-});
+type PrismaClientSingleton = ReturnType<typeof prismaClientSingleton>;
 
-// Create adapter for Prisma 7
-const adapter = new PrismaPg(pool);
+const globalForPrisma = globalThis as unknown as {
+  prisma: PrismaClientSingleton | undefined;
+};
 
-// Prisma 7 with adapter - use type assertion to work around type checking
-// The adapter is passed but PrismaClient types don't fully support it yet
-export const prisma: PrismaClient =
-  globalForPrisma.prisma ??
-  (new (PrismaClient as any)({
-    adapter,
-    log:
-      process.env.NODE_ENV === "development"
-        ? ["query", "error", "warn"]
-        : ["error"],
-  }) as PrismaClient);
+export const prisma = globalForPrisma.prisma ?? prismaClientSingleton();
 
 if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
