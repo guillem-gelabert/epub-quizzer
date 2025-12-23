@@ -11,7 +11,10 @@ export default defineNuxtConfig({
   nitro: {
     externals: {
       trace: false,
-      include: ["@prisma/client"],
+      exclude: ["@prisma/client"],
+    },
+    alias: {
+      "@prisma/client": "./generated/prisma/client",
     },
   },
   typescript: {
