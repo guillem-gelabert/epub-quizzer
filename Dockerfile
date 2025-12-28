@@ -49,6 +49,7 @@ RUN npm ci --only=production && \
 # Copy built application from builder
 COPY --from=builder /app/.output ./.output
 COPY --from=builder /app/prompts ./prompts
+COPY --from=builder /app/scripts ./scripts
 
 # Create non-root user
 RUN groupadd --system --gid 1001 nodejs && \
@@ -65,5 +66,5 @@ ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOST=0.0.0.0
 
-CMD ["node", ".output/server/index.mjs"]
+CMD ["sh", "-c", "node scripts/prisma-deploy.mjs && node .output/server/index.mjs"]
 
