@@ -187,3 +187,16 @@ Create a new migration:
 ```bash
 npx prisma migrate dev --name migration_name
 ```
+
+## Deploying on Railway
+
+1. Create a new Railway project and connect this repo.
+2. Add a **PostgreSQL** database in Railway.
+3. Set environment variables:
+   - `DATABASE_URL` (Railway Postgres provides this automatically when linked)
+   - `OPENAI_API_KEY`
+4. Deploy.
+
+On each deploy/start Railway will run a Prisma schema sync step:
+- If `prisma/migrations/` exists, it runs `prisma migrate deploy`.
+- Otherwise it runs `prisma db push` (keeps the app deployable until you commit migrations).

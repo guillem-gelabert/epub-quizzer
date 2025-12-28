@@ -8,7 +8,10 @@
     "generate": "nuxt generate",
     "preview": "nuxt preview",
     "typecheck": "nuxt typecheck",
-    "postinstall": "nuxt prepare",
+    "start": "node .output/server/index.mjs",
+    "db:deploy": "node scripts/prisma-deploy.mjs",
+    "start:railway": "node scripts/prisma-deploy.mjs && node .output/server/index.mjs",
+    "postinstall": "nuxt prepare && prisma generate",
     "docker:dev": "docker compose -f docker-compose.dev.yml up -d",
     "docker:dev:down": "docker compose -f docker-compose.dev.yml down",
     "docker:prod": "docker compose up -d --build",
@@ -29,6 +32,7 @@
     "nuxt": "^4.2.2",
     "openai": "^6.15.0",
     "pg": "^8.16.3",
+    "prisma": "^7.2.0",
     "typescript": "^5.9.3",
     "vue": "^3.5.25",
     "vue-router": "^4.6.4",
@@ -39,7 +43,6 @@
     "@playwright/test": "^1.57.0",
     "@types/node": "^25.0.3",
     "@types/pg": "^8.16.0",
-    "prisma": "^7.2.0",
     "tailwindcss": "^3.4.19"
   }
 }
