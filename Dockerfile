@@ -41,6 +41,7 @@ RUN apt-get update && apt-get install -y \
 # Install production dependencies only
 COPY package*.json ./
 COPY prisma ./prisma/
+COPY prisma.config.ts ./
 
 RUN npm ci --only=production && \
     npx prisma generate
@@ -48,7 +49,6 @@ RUN npm ci --only=production && \
 # Copy built application from builder
 COPY --from=builder /app/.output ./.output
 COPY --from=builder /app/prompts ./prompts
-COPY --from=builder /app/generated ./generated
 
 # Create non-root user
 RUN groupadd --system --gid 1001 nodejs && \
