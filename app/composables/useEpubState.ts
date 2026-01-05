@@ -5,7 +5,6 @@ import {
   GET_BOOKS,
   GET_BOOK,
   GET_BOOK_TOC,
-  ADD_BOOK_TO_SESSION,
 } from "./useGraphQL";
 
 // Shared state - singleton pattern
@@ -16,27 +15,7 @@ const chapterContent = ref<Record<string, string>>({});
 const tocToSpineMap = ref<Record<string, string>>({});
 
 export const useEpubState = () => {
-  const loadEpub = async (file: File) => {
-    // Upload file to server (handles parsing and DB storage)
-    const formData = new FormData();
-    formData.append("file", file);
-
-    const uploadResponse = await $fetch<{ bookId: string; filename: string }>(
-      "/api/books/upload",
-      {
-        method: "POST",
-        body: formData,
-      }
-    );
-
-    const bookId = uploadResponse.bookId;
-
-    // Add book to session via GraphQL
-    await graphqlQuery(ADD_BOOK_TO_SESSION, { bookId });
-
-    // Load book data from GraphQL
-    await loadBookFromServer(bookId);
-  };
+  // loadEpub removed - book uploads now require API key authentication via curl
 
   const loadBookFromServer = async (bookId: string) => {
     try {
@@ -139,7 +118,6 @@ export const useEpubState = () => {
     toc: computed(() => toc.value),
     chapterContent: computed(() => chapterContent.value),
     tocToSpineMap: computed(() => tocToSpineMap.value),
-    loadEpub,
     loadBookFromServer,
     initializeBook,
     clearBook,

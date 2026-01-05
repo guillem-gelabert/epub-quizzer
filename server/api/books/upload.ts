@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { db } from "../../utils/db";
-import { eq, and } from "drizzle-orm";
-import { books, sessionBooks, bookSections, chunks, sessions } from "../../../db/schema";
+import { eq } from "drizzle-orm";
+import { books, bookSections, chunks } from "../../../db/schema";
 import {
   parseEpubMetadata,
   extractToc,
@@ -11,6 +11,24 @@ import {
 import { chunkHtml } from "../../utils/chunking";
 
 export default defineEventHandler(async (event) => {
+  // Validate API key
+  const apiKey = event.headers.get("x-api-key") || event.headers.get("X-API-Key");
+  const expectedApiKey = process.env.API_KEY;
+
+  if (!expectedApiKey) {
+    throw createError({
+      statusCode: 500,
+      message: "API key not configured on server",
+    });
+  }
+
+  if (!apiKey || apiKey !== expectedApiKey) {
+    throw createError({
+      statusCode: 401,
+      message: "Invalid or missing API key",
+    });
+  }
+
   const formData = await readFormData(event);
   const file = formData.get("file") as File;
 
@@ -19,30 +37,6 @@ export default defineEventHandler(async (event) => {
       statusCode: 400,
       message: "Invalid file. Expected EPUB file.",
     });
-  }
-
-  // Get session ID from context (set by middleware)
-  let sessionId = event.context.sessionId;
-  if (!sessionId) {
-    throw createError({
-      statusCode: 401,
-      message: "Session required",
-    });
-  }
-
-  // Ensure session exists in database (might have been created as temporary)
-  const existingSession = await db.query.sessions.findFirst({
-    where: eq(sessions.id, sessionId),
-  });
-  
-  if (!existingSession) {
-    // Create session if it doesn't exist
-    const [newSession] = await db.insert(sessions).values({
-      id: sessionId,
-      userAgentHash: (event.headers.get("user-agent") || event.headers.get("User-Agent"))?.substring(0, 50) || null,
-      locale: (event.headers.get("accept-language") || event.headers.get("Accept-Language"))?.split(",")[0] || null,
-    }).returning();
-    sessionId = newSession.id;
   }
 
   // Calculate content hash
@@ -56,21 +50,7 @@ export default defineEventHandler(async (event) => {
   });
 
   if (book) {
-    // Book exists, just link it to session if not already linked
-    const existing = await db.query.sessionBooks.findFirst({
-      where: and(
-        eq(sessionBooks.sessionId, sessionId),
-        eq(sessionBooks.bookId, book.id)
-      ),
-    });
-    
-    if (!existing) {
-      await db.insert(sessionBooks).values({
-        sessionId,
-        bookId: book.id,
-      });
-    }
-
+    // Book already exists, return it
     return {
       bookId: book.id,
       filename: file.name,
@@ -134,12 +114,6 @@ export default defineEventHandler(async (event) => {
       );
     }
   }
-
-  // Link book to session
-  await db.insert(sessionBooks).values({
-    sessionId,
-    bookId: book.id,
-  });
 
   return {
     bookId: book.id,

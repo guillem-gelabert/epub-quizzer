@@ -20,26 +20,32 @@ An interactive EPUB reader with AI-generated quizzes to test comprehension.
 ### Local Development
 
 1. Install dependencies:
+
 ```bash
 npm install
 ```
 
 2. Set up environment variables:
+
 ```bash
 cp .env.example .env
 ```
 
 Edit `.env` and set:
+
 - `DATABASE_URL` - PostgreSQL connection string
 - `OPENAI_API_KEY` - Your OpenAI API key
+- `API_KEY` - API key for book uploads (used in `X-API-Key` header)
 
 3. Set up the database:
+
 ```bash
 npx drizzle-kit generate
 npx drizzle-kit migrate
 ```
 
 4. Start the development server:
+
 ```bash
 npm run dev
 ```
@@ -49,67 +55,81 @@ npm run dev
 #### Development with Docker Compose
 
 **Prerequisites:**
+
 - Docker Desktop must be running and unpaused
 - If you see "Docker Desktop is manually paused", unpause it through the Docker Desktop menu
 
 1. Create `.env` file:
+
 ```bash
 cp .env.example .env
 ```
 
 Edit `.env` and set:
+
 - `POSTGRES_USER` - PostgreSQL username (default: epubquizzer)
 - `POSTGRES_PASSWORD` - PostgreSQL password (default: epubquizzer)
 - `POSTGRES_DB` - Database name (default: epub_quizzer)
 - `OPENAI_API_KEY` - Your OpenAI API key
+- `API_KEY` - API key for book uploads (used in `X-API-Key` header)
 
 2. Start services:
+
 ```bash
 docker compose -f docker-compose.dev.yml up -d
 ```
 
 Or use the npm script:
+
 ```bash
 npm run docker:dev
 ```
 
 3. Run database migrations:
+
 ```bash
 docker compose -f docker-compose.dev.yml exec app npx drizzle-kit migrate
 ```
 
 Or use the npm script:
+
 ```bash
 npm run docker:migrate:dev
 ```
 
 4. Access the application:
+
 - App: http://localhost:3000
 - Database: localhost:5432
 
 #### Production with Docker Compose
 
 **Prerequisites:**
+
 - Docker Desktop must be running and unpaused
 
 1. Create `.env` file with production values
 
 2. Build and start:
+
 ```bash
 docker compose up -d --build
 ```
 
 Or use the npm script:
+
 ```bash
 npm run docker:prod
 ```
 
 3. Run database migrations:
+
 ```bash
 docker compose exec app npx drizzle-kit migrate
 ```
 
 Or use npm script:
+
 ```bash
 npm run docker:migrate
 ```
@@ -138,6 +158,23 @@ npm run docker:migrate
 - **Backend**: Nuxt server routes + Apollo GraphQL
 - **Database**: PostgreSQL with Drizzle ORM
 - **AI**: OpenAI API for quiz generation
+
+## Book Upload API
+
+Books can be uploaded via the REST API endpoint using curl:
+
+```bash
+curl -X POST \
+  -H "X-API-Key: your-api-key-here" \
+  -F "file=@book.epub" \
+  http://localhost:3000/api/books/upload
+```
+
+The API key must match the `API_KEY` environment variable. The endpoint returns:
+
+- `bookId` - UUID of the book (new or existing)
+- `filename` - Original filename
+- `isNew` - Boolean indicating if the book was newly created
 
 ## GraphQL API
 
@@ -174,16 +211,19 @@ The GraphQL endpoint is available at `/api/graphql`.
 ## Development
 
 Run Drizzle Studio to view database:
+
 ```bash
 npx drizzle-kit studio
 ```
 
 Generate migrations after schema changes:
+
 ```bash
 npx drizzle-kit generate
 ```
 
 Apply migrations:
+
 ```bash
 npx drizzle-kit migrate
 ```
@@ -195,8 +235,9 @@ npx drizzle-kit migrate
 3. Set environment variables:
    - `DATABASE_URL` (Railway Postgres provides this automatically when linked)
    - `OPENAI_API_KEY`
+   - `API_KEY` - API key for book uploads
 4. Deploy.
 
-On each deploy/start Railway will run a Prisma schema sync step:
-- If `prisma/migrations/` exists, it runs `prisma migrate deploy`.
-- Otherwise it runs `prisma db push` (keeps the app deployable until you commit migrations).
+On each deploy/start Railway will run a Drizzle migration step:
+
+- Run `npx drizzle-kit migrate` to apply migrations.

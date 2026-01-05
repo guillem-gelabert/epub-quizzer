@@ -8,13 +8,7 @@
       </div>
 
       <div v-else-if="books.length === 0" class="bg-white rounded-lg shadow-md p-8 text-center">
-        <p class="text-gray-600 mb-4">No books found.</p>
-        <button
-          @click="loadFromDirectory"
-          class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-        >
-          Load from .books directory
-        </button>
+        <p class="text-gray-600">No books found.</p>
       </div>
 
       <div v-else class="space-y-4">
@@ -70,30 +64,6 @@ const loadBooks = async () => {
     books.value = booksData.books || [];
   } catch (error) {
     console.error("Failed to load books:", error);
-  } finally {
-    loading.value = false;
-  }
-};
-
-const loadFromDirectory = async () => {
-  try {
-    loading.value = true;
-    const result = await $fetch<{
-      message: string;
-      loaded: Array<{ bookId: string; filename: string; isNew: boolean }>;
-      errors: Array<{ filename: string; error: string }>;
-    }>("/api/books/load-from-directory", {
-      method: "POST",
-    });
-
-    if (result.errors && result.errors.length > 0) {
-      console.error("Errors loading books:", result.errors);
-    }
-
-    // Reload books list
-    await loadBooks();
-  } catch (error) {
-    console.error("Failed to load from directory:", error);
   } finally {
     loading.value = false;
   }
