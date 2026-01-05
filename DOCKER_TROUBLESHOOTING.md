@@ -12,7 +12,7 @@
 
 ### Database Connection Issues
 
-**Error:** `Can't reach database server` or Prisma connection errors
+**Error:** `Can't reach database server` or Drizzle connection errors
 
 **Solutions:**
 1. Ensure PostgreSQL container is running:
@@ -32,7 +32,7 @@
 
 4. Run migrations:
    ```bash
-   docker compose exec app npx prisma migrate deploy
+   docker compose exec app npx drizzle-kit migrate
    ```
 
 ### Build Failures
@@ -74,13 +74,17 @@
    kill -9 <PID>
    ```
 
-### Prisma Client Not Generated
+### Drizzle Schema Issues
 
-**Error:** `Cannot find module '@prisma/client'`
+**Error:** `Cannot find module` or schema-related errors
 
 **Solution:**
 ```bash
-docker compose exec app npx prisma generate
+# Generate migrations from schema changes
+docker compose exec app npx drizzle-kit generate
+
+# Apply migrations
+docker compose exec app npx drizzle-kit migrate
 ```
 
 ### Session Middleware Errors
@@ -91,7 +95,7 @@ docker compose exec app npx prisma generate
 
 **Solution:** Run migrations as soon as the database is ready:
 ```bash
-docker compose exec app npx prisma migrate deploy
+docker compose exec app npx drizzle-kit migrate
 ```
 
 ## Useful Commands

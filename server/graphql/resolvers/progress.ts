@@ -1,4 +1,6 @@
 import type { GraphQLContext } from "../context";
+import { eq, and } from "drizzle-orm";
+import { readingProgress } from "../../../db/schema";
 
 export const progressResolvers = {
   Query: {
@@ -11,13 +13,11 @@ export const progressResolvers = {
         return null;
       }
 
-      return context.prisma.readingProgress.findUnique({
-        where: {
-          sessionId_bookId: {
-            sessionId: context.sessionId,
-            bookId,
-          },
-        },
+      return context.db.query.readingProgress.findFirst({
+        where: and(
+          eq(readingProgress.sessionId, context.sessionId),
+          eq(readingProgress.bookId, bookId)
+        ),
       });
     },
   },
@@ -40,24 +40,39 @@ export const progressResolvers = {
         throw new Error("Session required");
       }
 
-      return context.prisma.readingProgress.upsert({
-        where: {
-          sessionId_bookId: {
-            sessionId: context.sessionId,
-            bookId: input.bookId,
-          },
-        },
-        create: {
-          sessionId: context.sessionId,
-          bookId: input.bookId,
-          currentChunkIndex: input.currentChunkIndex,
-          unlockedUntilChunkIndex: input.unlockedUntilChunkIndex,
-        },
-        update: {
-          currentChunkIndex: input.currentChunkIndex,
-          unlockedUntilChunkIndex: input.unlockedUntilChunkIndex,
-        },
+      // Check if exists
+      const existing = await context.db.query.readingProgress.findFirst({
+        where: and(
+          eq(readingProgress.sessionId, context.sessionId),
+          eq(readingProgress.bookId, input.bookId)
+        ),
       });
+
+      if (existing) {
+        // Update
+        const [updated] = await context.db
+          .update(readingProgress)
+          .set({
+            currentChunkIndex: input.currentChunkIndex,
+            unlockedUntilChunkIndex: input.unlockedUntilChunkIndex,
+            updatedAt: new Date(),
+          })
+          .where(and(
+            eq(readingProgress.sessionId, context.sessionId),
+            eq(readingProgress.bookId, input.bookId)
+          ))
+          .returning();
+        return updated;
+      }
+
+      // Create
+      const [created] = await context.db.insert(readingProgress).values({
+        sessionId: context.sessionId,
+        bookId: input.bookId,
+        currentChunkIndex: input.currentChunkIndex,
+        unlockedUntilChunkIndex: input.unlockedUntilChunkIndex,
+      }).returning();
+      return created;
     },
   },
 };

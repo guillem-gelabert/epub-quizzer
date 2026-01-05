@@ -1,8 +1,8 @@
 import type { H3Event } from "h3";
-import { prisma } from "../utils/prisma";
+import { db } from "../utils/db";
 
 export interface GraphQLContext {
-  prisma: typeof prisma;
+  db: typeof db;
   sessionId: string | null;
   event: H3Event;
 }
@@ -12,9 +12,8 @@ export async function createContext(event: H3Event): Promise<GraphQLContext> {
   const sessionId = event.context.sessionId || null;
 
   return {
-    prisma,
+    db,
     sessionId,
     event,
   };
 }
-

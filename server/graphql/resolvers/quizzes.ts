@@ -5,6 +5,8 @@ import {
   type ReaderState,
 } from "../../../app/composables/useOpenAi";
 import path from "node:path";
+import { eq, and, gte, lte, asc } from "drizzle-orm";
+import { quizzes, chunks, readingProgress, quizAttempts } from "../../../db/schema";
 
 export const quizResolvers = {
   Query: {
@@ -17,18 +19,18 @@ export const quizResolvers = {
         return [];
       }
 
-      return context.prisma.quiz.findMany({
-        where: {
-          sessionId: context.sessionId,
-          bookId,
-        },
-        orderBy: { gateStartChunkIndex: "asc" },
+      return context.db.query.quizzes.findMany({
+        where: and(
+          eq(quizzes.sessionId, context.sessionId),
+          eq(quizzes.bookId, bookId)
+        ),
+        orderBy: (quizzes, { asc }) => [asc(quizzes.gateStartChunkIndex)],
       });
     },
 
     quiz: async (_: any, { id }: { id: string }, context: GraphQLContext) => {
-      return context.prisma.quiz.findUnique({
-        where: { id },
+      return context.db.query.quizzes.findFirst({
+        where: eq(quizzes.id, id),
       });
     },
   },
@@ -52,13 +54,13 @@ export const quizResolvers = {
       }
 
       // Check if quiz already exists
-      const existingQuiz = await context.prisma.quiz.findFirst({
-        where: {
-          sessionId: context.sessionId,
-          bookId: input.bookId,
-          gateStartChunkIndex: input.gateStartChunkIndex,
-          gateEndChunkIndex: input.gateEndChunkIndex,
-        },
+      const existingQuiz = await context.db.query.quizzes.findFirst({
+        where: and(
+          eq(quizzes.sessionId, context.sessionId),
+          eq(quizzes.bookId, input.bookId),
+          eq(quizzes.gateStartChunkIndex, input.gateStartChunkIndex),
+          eq(quizzes.gateEndChunkIndex, input.gateEndChunkIndex)
+        ),
       });
 
       if (existingQuiz) {
@@ -66,35 +68,31 @@ export const quizResolvers = {
       }
 
       // Fetch chunks for the gate window
-      const chunks = await context.prisma.chunk.findMany({
-        where: {
-          bookId: input.bookId,
-          chunkIndex: {
-            gte: input.gateStartChunkIndex,
-            lte: input.gateEndChunkIndex,
-          },
-        },
-        orderBy: { chunkIndex: "asc" },
+      const chunksData = await context.db.query.chunks.findMany({
+        where: and(
+          eq(chunks.bookId, input.bookId),
+          gte(chunks.chunkIndex, input.gateStartChunkIndex),
+          lte(chunks.chunkIndex, input.gateEndChunkIndex)
+        ),
+        orderBy: (chunks, { asc }) => [asc(chunks.chunkIndex)],
       });
 
-      if (chunks.length === 0) {
+      if (chunksData.length === 0) {
         throw new Error("No chunks found for gate window");
       }
 
       // Convert to PipelineChunk format
-      const windowChunks: PipelineChunk[] = chunks.map((chunk: { chunkIndex: number; text: string }, index: number) => ({
+      const windowChunks: PipelineChunk[] = chunksData.map((chunk) => ({
         id: `chunk-${chunk.chunkIndex}`,
         text: chunk.text,
       }));
 
       // Get or create reading progress to get reader state
-      const progress = await context.prisma.readingProgress.findUnique({
-        where: {
-          sessionId_bookId: {
-            sessionId: context.sessionId,
-            bookId: input.bookId,
-          },
-        },
+      const progress = await context.db.query.readingProgress.findFirst({
+        where: and(
+          eq(readingProgress.sessionId, context.sessionId),
+          eq(readingProgress.bookId, input.bookId)
+        ),
       });
 
       // Build reader state (simplified - you may want to store this in DB)
@@ -105,7 +103,7 @@ export const quizResolvers = {
       };
 
       // Calculate question count based on word count
-      const totalWords = chunks.reduce((sum: number, chunk: { wordCount: number }) => sum + chunk.wordCount, 0);
+      const totalWords = chunksData.reduce((sum, chunk) => sum + chunk.wordCount, 0);
       let questionCount: 1 | 2 | 3 | 4 = 1;
       if (totalWords >= 400) {
         questionCount = 4;
@@ -135,16 +133,14 @@ export const quizResolvers = {
       });
 
       // Store quiz in database
-      const quiz = await context.prisma.quiz.create({
-        data: {
-          sessionId: context.sessionId,
-          bookId: input.bookId,
-          gateStartChunkIndex: input.gateStartChunkIndex,
-          gateEndChunkIndex: input.gateEndChunkIndex,
-          facts: result.facts as any,
-          questions: result.mcq as any,
-        },
-      });
+      const [quiz] = await context.db.insert(quizzes).values({
+        sessionId: context.sessionId,
+        bookId: input.bookId,
+        gateStartChunkIndex: input.gateStartChunkIndex,
+        gateEndChunkIndex: input.gateEndChunkIndex,
+        facts: result.facts as any,
+        questions: result.mcq as any,
+      }).returning();
 
       return quiz;
     },
@@ -162,8 +158,8 @@ export const quizResolvers = {
       context: GraphQLContext
     ) => {
       // Get quiz to check correct answers
-      const quiz = await context.prisma.quiz.findUnique({
-        where: { id: input.quizId },
+      const quiz = await context.db.query.quizzes.findFirst({
+        where: eq(quizzes.id, input.quizId),
       });
 
       if (!quiz) {
@@ -185,14 +181,12 @@ export const quizResolvers = {
       const passed = correctCount === questions.length;
 
       // Create attempt
-      const attempt = await context.prisma.quizAttempt.create({
-        data: {
-          quizId: input.quizId,
-          answers: input.answers as any,
-          correctCount,
-          passed,
-        },
-      });
+      const [attempt] = await context.db.insert(quizAttempts).values({
+        quizId: input.quizId,
+        answers: input.answers as any,
+        correctCount,
+        passed,
+      }).returning();
 
       return attempt;
     },

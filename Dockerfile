@@ -1,18 +1,12 @@
 # Build stage
-FROM node:22 AS builder
+FROM node:lts-alpine3.17
 
 WORKDIR /app
 
-# Install OpenSSL and other dependencies for Prisma
-RUN apt-get update && apt-get install -y \
-    openssl \
-    libssl-dev \
-    && rm -rf /var/lib/apt/lists/*
 
-# Copy package files
-COPY package*.json ./
-COPY prisma ./prisma/
-COPY prisma.config.ts ./
+
+COPY package.json package-lock.json ./
+
 
 # Install dependencies
 RUN npm ci
@@ -20,8 +14,7 @@ RUN npm ci
 # Copy source code (excluding files in .dockerignore)
 COPY . .
 
-# Generate Prisma client
-RUN npx prisma generate
+# Drizzle doesn't require client generation
 
 # Build the application
 RUN npm run build
@@ -31,7 +24,7 @@ FROM node:22 AS runner
 
 WORKDIR /app
 
-# Install wget and OpenSSL for healthcheck and Prisma
+# Install wget and OpenSSL for healthcheck
 RUN apt-get update && apt-get install -y \
     wget \
     openssl \
@@ -40,15 +33,13 @@ RUN apt-get update && apt-get install -y \
 
 # Install production dependencies only
 COPY package*.json ./
-COPY prisma ./prisma/
-COPY prisma.config.ts ./
 
-RUN npm ci --only=production && \
-    npx prisma generate
+RUN npm ci --only=production
 
 # Copy built application from builder
 COPY --from=builder /app/.output ./.output
 COPY --from=builder /app/prompts ./prompts
+COPY --from=builder /app/db ./db
 
 # Create non-root user
 RUN groupadd --system --gid 1001 nodejs && \

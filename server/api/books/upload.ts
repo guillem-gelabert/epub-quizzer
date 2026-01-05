@@ -1,5 +1,7 @@
 import crypto from "node:crypto";
-import { prisma } from "../../utils/prisma";
+import { db } from "../../utils/db";
+import { eq, and } from "drizzle-orm";
+import { books, sessionBooks, bookSections, chunks, sessions } from "../../../db/schema";
 import {
   parseEpubMetadata,
   extractToc,
@@ -20,12 +22,27 @@ export default defineEventHandler(async (event) => {
   }
 
   // Get session ID from context (set by middleware)
-  const sessionId = event.context.sessionId;
+  let sessionId = event.context.sessionId;
   if (!sessionId) {
     throw createError({
       statusCode: 401,
       message: "Session required",
     });
+  }
+
+  // Ensure session exists in database (might have been created as temporary)
+  const existingSession = await db.query.sessions.findFirst({
+    where: eq(sessions.id, sessionId),
+  });
+  
+  if (!existingSession) {
+    // Create session if it doesn't exist
+    const [newSession] = await db.insert(sessions).values({
+      id: sessionId,
+      userAgentHash: (event.headers.get("user-agent") || event.headers.get("User-Agent"))?.substring(0, 50) || null,
+      locale: (event.headers.get("accept-language") || event.headers.get("Accept-Language"))?.split(",")[0] || null,
+    }).returning();
+    sessionId = newSession.id;
   }
 
   // Calculate content hash
@@ -34,25 +51,25 @@ export default defineEventHandler(async (event) => {
   const contentHash = crypto.createHash("sha256").update(buffer).digest("hex");
 
   // Check if book already exists
-  let book = await prisma.book.findUnique({
-    where: { contentHash },
+  let book = await db.query.books.findFirst({
+    where: eq(books.contentHash, contentHash),
   });
 
   if (book) {
     // Book exists, just link it to session if not already linked
-    await prisma.sessionBook.upsert({
-      where: {
-        sessionId_bookId: {
-          sessionId,
-          bookId: book.id,
-        },
-      },
-      create: {
+    const existing = await db.query.sessionBooks.findFirst({
+      where: and(
+        eq(sessionBooks.sessionId, sessionId),
+        eq(sessionBooks.bookId, book.id)
+      ),
+    });
+    
+    if (!existing) {
+      await db.insert(sessionBooks).values({
         sessionId,
         bookId: book.id,
-      },
-      update: {},
-    });
+      });
+    }
 
     return {
       bookId: book.id,
@@ -67,22 +84,22 @@ export default defineEventHandler(async (event) => {
   const sections = await parseAllSections(buffer);
 
   // Create book in database (we'll update coverPath after extraction)
-  book = await prisma.book.create({
-    data: {
-      contentHash,
-      title: metadata.title,
-      author: metadata.author,
-      toc: toc as any, // Store TOC as JSONB
-    },
-  });
+  const [newBook] = await db.insert(books).values({
+    contentHash,
+    title: metadata.title,
+    author: metadata.author,
+    toc: toc as any, // Store TOC as JSONB
+  }).returning();
+  book = newBook;
 
   // Extract and save cover image
   const coverPath = await extractCover(buffer, book.id);
   if (coverPath) {
-    book = await prisma.book.update({
-      where: { id: book.id },
-      data: { coverPath },
-    });
+    const [updatedBook] = await db.update(books)
+      .set({ coverPath })
+      .where(eq(books.id, book.id))
+      .returning();
+    book = updatedBook;
   }
 
   // Create sections and precompute chunks
@@ -90,24 +107,22 @@ export default defineEventHandler(async (event) => {
 
   for (const section of sections) {
     // Create book section
-    const bookSection = await prisma.bookSection.create({
-      data: {
-        bookId: book.id,
-        sectionIndex: section.sectionIndex,
-        href: section.href,
-        title: section.title,
-        html: section.html,
-        plainText: section.html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(),
-      },
-    });
+    const [bookSection] = await db.insert(bookSections).values({
+      bookId: book.id,
+      sectionIndex: section.sectionIndex,
+      href: section.href,
+      title: section.title,
+      html: section.html,
+      plainText: section.html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(),
+    }).returning();
 
     // Precompute chunks for this section
-    const chunks = chunkHtml(section.html, section.sectionIndex);
+    const chunkData = chunkHtml(section.html, section.sectionIndex);
 
     // Create chunk records
-    for (const chunk of chunks) {
-      await prisma.chunk.create({
-        data: {
+    if (chunkData.length > 0) {
+      await db.insert(chunks).values(
+        chunkData.map((chunk) => ({
           bookId: book.id,
           chunkIndex: globalChunkIndex++,
           sectionId: bookSection.id,
@@ -115,17 +130,15 @@ export default defineEventHandler(async (event) => {
           text: chunk.text,
           wordCount: chunk.wordCount,
           sourceHint: chunk.sourceHint as any,
-        },
-      });
+        }))
+      );
     }
   }
 
   // Link book to session
-  await prisma.sessionBook.create({
-    data: {
-      sessionId,
-      bookId: book.id,
-    },
+  await db.insert(sessionBooks).values({
+    sessionId,
+    bookId: book.id,
   });
 
   return {

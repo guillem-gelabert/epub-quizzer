@@ -1,4 +1,6 @@
 import type { GraphQLContext } from "../context";
+import { eq, gte, asc } from "drizzle-orm";
+import { chunks } from "../../../db/schema";
 
 export const chunkResolvers = {
   Query: {
@@ -11,15 +13,13 @@ export const chunkResolvers = {
       }: { bookId: string; from?: number; limit?: number },
       context: GraphQLContext
     ) => {
-      return context.prisma.chunk.findMany({
-        where: {
-          bookId,
-          chunkIndex: {
-            gte: from,
-          },
-        },
-        orderBy: { chunkIndex: "asc" },
-        take: limit,
+      return context.db.query.chunks.findMany({
+        where: and(
+          eq(chunks.bookId, bookId),
+          gte(chunks.chunkIndex, from)
+        ),
+        orderBy: (chunks, { asc }) => [asc(chunks.chunkIndex)],
+        limit,
       });
     },
   },

@@ -35,8 +35,8 @@ Edit `.env` and set:
 
 3. Set up the database:
 ```bash
-npx prisma migrate dev
-npx prisma generate
+npx drizzle-kit generate
+npx drizzle-kit migrate
 ```
 
 4. Start the development server:
@@ -75,7 +75,7 @@ npm run docker:dev
 
 3. Run database migrations:
 ```bash
-docker compose -f docker-compose.dev.yml exec app npx prisma migrate dev
+docker compose -f docker-compose.dev.yml exec app npx drizzle-kit migrate
 ```
 
 Or use the npm script:
@@ -106,7 +106,7 @@ npm run docker:prod
 
 3. Run database migrations:
 ```bash
-docker compose exec app npx prisma migrate deploy
+docker compose exec app npx drizzle-kit migrate
 ```
 
 Or use npm script:
@@ -136,7 +136,7 @@ npm run docker:migrate
 
 - **Frontend**: Nuxt 3 with Vue 3
 - **Backend**: Nuxt server routes + Apollo GraphQL
-- **Database**: PostgreSQL with Prisma ORM
+- **Database**: PostgreSQL with Drizzle ORM
 - **AI**: OpenAI API for quiz generation
 
 ## GraphQL API
@@ -173,19 +173,19 @@ The GraphQL endpoint is available at `/api/graphql`.
 
 ## Development
 
-Run Prisma Studio to view database:
+Run Drizzle Studio to view database:
 ```bash
-npx prisma studio
+npx drizzle-kit studio
 ```
 
-Generate Prisma client after schema changes:
+Generate migrations after schema changes:
 ```bash
-npx prisma generate
+npx drizzle-kit generate
 ```
 
-Create a new migration:
+Apply migrations:
 ```bash
-npx prisma migrate dev --name migration_name
+npx drizzle-kit migrate
 ```
 
 ## Deploying on Railway

@@ -3,6 +3,8 @@ import { chunkResolvers } from "./chunks";
 import { progressResolvers } from "./progress";
 import { sessionResolvers } from "./session";
 import { quizResolvers } from "./quizzes";
+import { eq, desc } from "drizzle-orm";
+import { bookSections, quizAttempts } from "../../../db/schema";
 
 export const resolvers = {
   Query: {
@@ -22,17 +24,17 @@ export const resolvers = {
       if (parent.sections) {
         return parent.sections; // Already loaded via include
       }
-      return context.prisma.bookSection.findMany({
-        where: { bookId: parent.id },
-        orderBy: { sectionIndex: "asc" },
+      return context.db.query.bookSections.findMany({
+        where: eq(bookSections.bookId, parent.id),
+        orderBy: (sections, { asc }) => [asc(sections.sectionIndex)],
       });
     },
   },
   Quiz: {
     attempts: async (parent: any, _: any, context: any) => {
-      return context.prisma.quizAttempt.findMany({
-        where: { quizId: parent.id },
-        orderBy: { answeredAt: "desc" },
+      return context.db.query.quizAttempts.findMany({
+        where: eq(quizAttempts.quizId, parent.id),
+        orderBy: (attempts, { desc }) => [desc(attempts.answeredAt)],
       });
     },
   },

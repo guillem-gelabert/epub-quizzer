@@ -38,14 +38,14 @@ services:
       - ./prompts:/app/prompts:ro
     networks:
       - epub-quizzer-network
-    command: sh -c "npm install && npx prisma generate && npm run dev"
+    command: sh -c "npm install && npm run dev"
     restart: unless-stopped
 
-  prisma-studio:
+  drizzle-studio:
     build:
       context: .
       dockerfile: Dockerfile.dev
-    container_name: epub-quizzer-prisma-studio-dev
+    container_name: epub-quizzer-drizzle-studio-dev
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-epubquizzer}:${POSTGRES_PASSWORD:-epubquizzer}@postgres:5432/${POSTGRES_DB:-epubquizzer}?schema=public
       NODE_ENV: development
@@ -59,7 +59,7 @@ services:
       - /app/node_modules
     networks:
       - epub-quizzer-network
-    command: sh -c "npm install && npx prisma generate && npx prisma studio --browser none --port 5555"
+    command: sh -c "npm install && npx drizzle-kit studio --port 5555"
     restart: unless-stopped
 
 volumes:
