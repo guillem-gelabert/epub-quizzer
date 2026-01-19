@@ -3,6 +3,10 @@ export default defineNuxtConfig({
     host: "0",
     port: 3000,
   },
+  server: {
+    host: "0.0.0.0",
+    port: process.env.PORT ? Number(process.env.PORT) : 3000,
+  },
   compatibilityDate: "2025-07-15",
   devtools: { enabled: true },
   modules: ["@nuxtjs/tailwindcss"],
